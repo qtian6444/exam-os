@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import type { ReadingBreakdownCardData, BreakdownContent } from '../../types';
-import { getMockBreakdown } from '../../data/mock';
+import { getBreakdown } from '../../lib/deepseek';
 
 interface Props {
   data: ReadingBreakdownCardData;
@@ -18,6 +18,7 @@ export default function ReadingBreakdownCard({ data, onComplete }: Props) {
   const [content, setContent] = useState<BreakdownContent | null>(data.content);
   const [revealStep, setRevealStep] = useState(0);
   const [loading, setLoading] = useState(!data.content);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     if (data.content) {
@@ -26,20 +27,31 @@ export default function ReadingBreakdownCard({ data, onComplete }: Props) {
       return;
     }
 
-    // Mock: simulate API delay then return breakdown
-    const breakdown = getMockBreakdown(data.cardId);
-    if (breakdown) {
-      const timer = setTimeout(() => {
-        setContent({
-          main_clause: breakdown[0],
-          relation: breakdown[1],
-          natural_meaning: breakdown[2],
-        });
-        setLoading(false);
-      }, 1200);
-      return () => clearTimeout(timer);
+    let cancelled = false;
+
+    async function fetchBreakdown() {
+      setLoading(true);
+      setError(false);
+
+      try {
+        const result = await getBreakdown(data.cardId, data.sentence);
+        if (!cancelled) {
+          setContent(result);
+          setLoading(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setError(true);
+          setLoading(false);
+        }
+      }
     }
-  }, [data.cardId, data.content]);
+
+    fetchBreakdown();
+    return () => {
+      cancelled = true;
+    };
+  }, [data.cardId, data.content, data.sentence]);
 
   const handleReveal = () => {
     if (!content) return;
@@ -71,6 +83,10 @@ export default function ReadingBreakdownCard({ data, onComplete }: Props) {
             AI is reading...
           </motion.span>
         </div>
+      ) : error ? (
+        <div className="breakdown__loading">
+          <span style={{ color: 'var(--error)' }}>AI 暂时不可用，请稍后重试</span>
+        </div>
       ) : (
         <div className="breakdown__steps">
           {STEPS.map((step, i) => (
@@ -90,7 +106,7 @@ export default function ReadingBreakdownCard({ data, onComplete }: Props) {
         </div>
       )}
 
-      {!loading && !allRevealed && (
+      {!loading && !error && !allRevealed && (
         <motion.button
           className="breakdown__reveal-btn"
           onClick={handleReveal}
@@ -100,7 +116,7 @@ export default function ReadingBreakdownCard({ data, onComplete }: Props) {
         </motion.button>
       )}
 
-      {allRevealed && (
+      {(allRevealed || error) && (
         <motion.button
           className="breakdown__continue-btn"
           onClick={onComplete}
