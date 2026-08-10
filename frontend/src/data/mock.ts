@@ -5,14 +5,18 @@ import {
   type ReorderCardData,
   type LearningCard,
 } from '../types';
+import { breakdownSentences, reorderSentences } from './content-library';
 
-// ── Mock Card Queue ──
-// This drives the first vertical slice. Later replaced by Edge Function calls.
+// ── Card Queue (Real CET-4 Content) ──
 
-const mockCards: LearningCard[] = [
-  // Card 1: Choice — initial_choice (reading preference/style)
-  {
-    cardId: 'choice-001',
+let cardIndex = 0;
+
+function buildCardQueue(): LearningCard[] {
+  const cards: LearningCard[] = [];
+
+  // Card 1: Choice — welcome preference
+  cards.push({
+    cardId: 'choice-welcome',
     cardType: CardType.CHOICE,
     flowStep: 'initial_choice',
     sentence: '',
@@ -20,22 +24,21 @@ const mockCards: LearningCard[] = [
       { id: 'opt-short', text: '我喜欢短句，一段一段来' },
       { id: 'opt-long', text: '我敢挑战长句，一口气读完' },
     ],
-    correctOptionId: '', // preference card, no right/wrong
-  } as ChoiceCardData,
+    correctOptionId: '',
+  } as ChoiceCardData);
 
-  // Card 2: Reading Breakdown
-  {
+  // Card 2: Reading Breakdown — first real CET-4 sentence (Pandas)
+  cards.push({
     cardId: 'breakdown-001',
     cardType: CardType.READING_BREAKDOWN,
     state: 'loading',
-    sentence:
-      'The researchers found that students who regularly engaged in collaborative problem-solving activities demonstrated significantly higher levels of critical thinking ability compared to those who worked individually.',
+    sentence: breakdownSentences[0].sentence,
     content: null,
-  } as ReadingBreakdownCardData,
+  } as ReadingBreakdownCardData);
 
-  // Card 3: Choice — initial_choice (goal)
-  {
-    cardId: 'choice-002',
+  // Card 3: Choice — goal preference
+  cards.push({
+    cardId: 'choice-goal',
     cardType: CardType.CHOICE,
     flowStep: 'initial_choice',
     sentence: '',
@@ -44,58 +47,106 @@ const mockCards: LearningCard[] = [
       { id: 'opt-excel', text: '我想考一个好分数' },
     ],
     correctOptionId: '',
-  } as ChoiceCardData,
+  } as ChoiceCardData);
 
-  // Card 4: Reorder
-  {
-    cardId: 'reorder-001',
-    cardType: CardType.REORDER,
-    chunks: [
-      { id: 'c1', text: 'The researchers found' },
-      { id: 'c2', text: 'that students who regularly engaged' },
-      { id: 'c3', text: 'in collaborative problem-solving activities' },
-      { id: 'c4', text: 'demonstrated significantly higher levels' },
-      { id: 'c5', text: 'of critical thinking ability' },
-    ],
-    correctOrder: ['c1', 'c2', 'c3', 'c4', 'c5'],
-  } as ReorderCardData,
-
-  // Card 5: Reading Breakdown (second sentence)
-  {
+  // Card 4: Reading Breakdown — Grit sentence
+  cards.push({
     cardId: 'breakdown-002',
     cardType: CardType.READING_BREAKDOWN,
     state: 'loading',
-    sentence:
-      'Despite the widespread adoption of digital learning platforms, many educators argue that face-to-face interaction remains an irreplaceable component of effective education.',
+    sentence: breakdownSentences[2].sentence,
     content: null,
-  } as ReadingBreakdownCardData,
-];
+  } as ReadingBreakdownCardData);
 
-let cardIndex = 0;
+  // Card 5: Reorder — real CET-4 sentence (Dress)
+  cards.push({
+    cardId: 'reorder-001',
+    cardType: CardType.REORDER,
+    chunks: reorderSentences[2].chunks.map((text, i) => ({
+      id: String.fromCharCode(97 + i), // a, b, c, d...
+      text,
+    })),
+    correctOrder: ['a', 'b', 'c', 'd'],
+  } as ReorderCardData);
+
+  // Card 6: Reading Breakdown — Dress sentence
+  cards.push({
+    cardId: 'breakdown-003',
+    cardType: CardType.READING_BREAKDOWN,
+    state: 'loading',
+    sentence: breakdownSentences[4].sentence,
+    content: null,
+  } as ReadingBreakdownCardData);
+
+  // Card 7: Choice — real CET-4 comprehension question (Pandas Q46)
+  cards.push({
+    cardId: 'choice-q46',
+    cardType: CardType.CHOICE,
+    flowStep: 'initial_choice',
+    sentence: 'What do we learn from new research about pandas?',
+    options: [
+      { id: 'A', text: 'They are losing habitat due to the building of roads and houses.' },
+      { id: 'B', text: 'They have stopped seeking new mates for reproduction.' },
+      { id: 'C', text: 'They may not adapt to the fragmentation of their habitat.' },
+      { id: 'D', text: 'They may cease to exist as a result of enjoying too good a life.' },
+    ],
+    correctOptionId: 'D',
+  } as ChoiceCardData);
+
+  // Card 8: Reading Breakdown — Beauty sentence
+  cards.push({
+    cardId: 'breakdown-004',
+    cardType: CardType.READING_BREAKDOWN,
+    state: 'loading',
+    sentence: breakdownSentences[6].sentence,
+    content: null,
+  } as ReadingBreakdownCardData);
+
+  // Card 9: Reorder — Grit sentence
+  cards.push({
+    cardId: 'reorder-002',
+    cardType: CardType.REORDER,
+    chunks: reorderSentences[1].chunks.map((text, i) => ({
+      id: String.fromCharCode(97 + i),
+      text,
+    })),
+    correctOrder: ['a', 'b', 'c'],
+  } as ReorderCardData);
+
+  // Card 10: Reading Breakdown — Plant-based meat sentence
+  cards.push({
+    cardId: 'breakdown-005',
+    cardType: CardType.READING_BREAKDOWN,
+    state: 'loading',
+    sentence: breakdownSentences[8].sentence,
+    content: null,
+  } as ReadingBreakdownCardData);
+
+  return cards;
+}
+
+const mockCards = buildCardQueue();
 
 export function getNextCard(): LearningCard | null {
   if (cardIndex >= mockCards.length) return null;
   return mockCards[cardIndex++];
 }
 
+export function getTotalCards(): number {
+  return mockCards.length;
+}
+
 export function resetCardQueue(): void {
   cardIndex = 0;
 }
 
-// ── Mock Breakdown Responses (no DeepSeek API for now) ──
-const mockBreakdowns: Record<string, string[]> = {
-  'breakdown-001': [
-    'The researchers found that students demonstrated higher levels of critical thinking ability.',
-    'who regularly engaged in collaborative problem-solving activities → compared to those who worked individually',
-    '经常参与小组解决问题的学生，批判性思维能力明显更强。',
-  ],
-  'breakdown-002': [
-    'Many educators argue that face-to-face interaction remains an irreplaceable component.',
-    'Despite the widespread adoption of digital learning platforms → this is the contrast to the main argument',
-    '虽然大家都在用在线平台，但很多老师认为面对面交流还是不可替代的。',
-  ],
-};
+// ── Real Breakdown Content Map ──
+const breakdownMap: Record<string, string[]> = {};
+breakdownSentences.forEach((item, i) => {
+  const cardId = `breakdown-${String(i + 1).padStart(3, '0')}`;
+  breakdownMap[cardId] = [item.mainClause, item.relation, item.naturalMeaning];
+});
 
 export function getMockBreakdown(cardId: string): string[] | null {
-  return mockBreakdowns[cardId] || null;
+  return breakdownMap[cardId] || null;
 }

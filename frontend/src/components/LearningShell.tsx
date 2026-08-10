@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import type { LearningCard, CardType } from '../types';
-import { getNextCard } from '../data/mock';
+import { getNextCard, getTotalCards } from '../data/mock';
 import ChoiceCard from './cards/ChoiceCard';
 import ReadingBreakdownCard from './cards/ReadingBreakdownCard';
 import ReorderCard from './cards/ReorderCard';
@@ -16,6 +16,7 @@ export default function LearningShell({ onComplete }: Props) {
   const [cardKey, setCardKey] = useState(0);
   const [cardsDone, setCardsDone] = useState(0);
   const [startTime] = useState(() => Date.now());
+  const [totalCards] = useState(() => getTotalCards());
 
   const advance = useCallback(() => {
     const next = getNextCard();
@@ -99,7 +100,7 @@ export default function LearningShell({ onComplete }: Props) {
       <div className="learning-shell__header">
         <SessionTimer startTime={startTime} />
         <span className="learning-shell__progress">
-          {cardsDone + 1}/5
+          {cardsDone + 1}/{totalCards}
         </span>
       </div>
 
