@@ -7,12 +7,11 @@ import { useSession } from './hooks/useSession';
 import type { ExamType, ExamBatch, DailyTime } from './types';
 
 export default function App() {
-  const { stage, startLearning, completeSession, session } =
-    useSession();
+  const { stage, startLearning, completeSession, session } = useSession();
 
   const handleOnboardingComplete = useCallback(
-    (_profile: { examType: ExamType; examBatch: ExamBatch; dailyTime: DailyTime }) => {
-      startLearning();
+    (profile: { examType: ExamType; examBatch: ExamBatch; dailyTime: DailyTime }) => {
+      startLearning(profile);
     },
     [startLearning],
   );
@@ -41,6 +40,7 @@ export default function App() {
         {stage === 'learning' && (
           <LearningShell
             key="learning"
+            sessionId={session.current.sessionId}
             onComplete={handleLearningComplete}
           />
         )}

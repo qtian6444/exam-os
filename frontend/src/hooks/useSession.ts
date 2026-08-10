@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import type { UserProfile, SessionData, AppStage } from '../types';
+import { getUserId } from '../lib/supabase';
+import { upsertUserProfile } from '../lib/db';
 
 function generateId(): string {
   return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -12,6 +14,7 @@ export function useSession() {
     examBatch: null,
     dailyTime: null,
   });
+  const [userId] = useState(() => getUserId());
 
   const sessionRef = useRef<SessionData>({
     sessionId: generateId(),
@@ -25,16 +28,26 @@ export function useSession() {
     setProfile((prev) => ({ ...prev, ...patch }));
   }, []);
 
-  const startLearning = useCallback(() => {
-    sessionRef.current = {
-      sessionId: generateId(),
-      startTime: Date.now(),
-      endTime: null,
-      cardsCompleted: 0,
-      actions: [],
-    };
-    setStage('learning' as AppStage);
-  }, []);
+  const startLearning = useCallback(
+    async (finalProfile: { examType: string; examBatch: string; dailyTime: string }) => {
+      // Persist user profile to Supabase
+      await upsertUserProfile({
+        examType: finalProfile.examType as any,
+        examBatch: finalProfile.examBatch as any,
+        dailyTime: finalProfile.dailyTime as any,
+      });
+
+      sessionRef.current = {
+        sessionId: generateId(),
+        startTime: Date.now(),
+        endTime: null,
+        cardsCompleted: 0,
+        actions: [],
+      };
+      setStage('learning' as AppStage);
+    },
+    [],
+  );
 
   const completeSession = useCallback(() => {
     sessionRef.current.endTime = Date.now();
@@ -53,6 +66,7 @@ export function useSession() {
     stage,
     profile,
     session: sessionRef,
+    userId,
     updateProfile,
     startLearning,
     completeSession,
