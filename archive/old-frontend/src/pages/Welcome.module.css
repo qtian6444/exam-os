@@ -1,0 +1,128 @@
+/* Journey 02 — Welcome */
+
+.welcome {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  gap: var(--space-24);
+}
+
+.background {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(
+    180deg,
+    var(--bg-welcome-start, #F8FFF8) 0%,
+    var(--bg-welcome-end, #EAFBF0) 100%
+  );
+}
+
+.clouds {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.cloud {
+  position: absolute;
+  top: 12%;
+  width: 140px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 40px;
+  filter: blur(10px);
+}
+
+.grass {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.grassSvg {
+  width: 100%;
+  height: 80px;
+}
+
+.character {
+  z-index: 2;
+  margin-top: auto;
+  padding-top: 15vh;
+}
+
+.copy {
+  z-index: 3;
+  text-align: center;
+}
+
+.heading {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary, #2D3436);
+  max-width: 280px;
+  margin: 0;
+}
+
+.aiText {
+  z-index: 3;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-secondary, #6C757D);
+  text-align: center;
+  max-width: 260px;
+  min-height: 20px;
+  margin: 0;
+}
+
+.ctaContainer {
+  z-index: 4;
+  margin-bottom: 15vh;
+}
+
+.cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 280px;
+  max-width: 360px;
+  height: 56px;
+  padding: 0 24px;
+  border: none;
+  border-radius: 999px;
+  background: #58CC6A;
+  color: #FFFFFF;
+  font-family: inherit;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0px 4px 24px rgba(88, 204, 106, 0.22);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  transition: transform 0.1s ease, background 0.15s ease;
+}
+
+.cta:active {
+  background: #43B75A;
+  transform: scale(0.97);
+}
+
+.ctaLoading {
+  background: #43B75A;
+  cursor: default;
+  pointer-events: none;
+}
+
+.arrowIcon {
+  transition: transform 0.2s ease;
+}

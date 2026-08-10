@@ -1,0 +1,126 @@
+/* Journey 01 — Splash */
+/* 背景 = 参考图  / 代码 = Logo + 按钮 + 动画 */
+
+.splash {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* 背景图 */
+.bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+
+/* ── 星光闪烁 ── */
+.stars {
+  position: absolute;
+  inset: 0;
+  height: 58%;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.star {
+  position: absolute;
+  border-radius: 50%;
+  background: #FFFFFF;
+  box-shadow: 0 0 4px rgba(255,255,255,0.35);
+}
+
+/* ── 云层 ── */
+.clouds {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.cloud {
+  position: absolute;
+  height: 14px;
+  border-radius: 40px;
+  background: rgba(255, 255, 255, 0.06);
+  filter: blur(8px);
+}
+
+/* ── Logo 居中 ── */
+.header {
+  position: absolute;
+  top: 54px;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  z-index: 10;
+}
+
+.logo {
+  display: flex;
+  align-items: baseline;
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.5px;
+}
+
+.logoExam {
+  color: #FFFFFF;
+}
+
+.logoOS {
+  color: #4CD964;
+}
+
+.slogan {
+  font-size: 15px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1.5;
+}
+
+/* ── 按钮 ── */
+.ctaWrap {
+  position: absolute;
+  bottom: 36px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  z-index: 10;
+}
+
+.cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 75%;
+  max-width: 310px;
+  height: 54px;
+  border: none;
+  border-radius: 999px;
+  background: #4CD964;
+  color: #FFFFFF;
+  font-family: inherit;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0px 2px 18px rgba(76, 217, 100, 0.22);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  outline: none;
+  transition: transform 0.08s ease, background 0.15s ease;
+}
+
+.cta:active {
+  background: #3CB950;
+  transform: scale(0.97);
+}

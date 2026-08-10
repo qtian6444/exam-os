@@ -1,0 +1,93 @@
+/* ============================================
+   Exam OS Global Design System V1.0 — CSS Tokens
+   ============================================ */
+
+:root {
+  /* ── Brand ── */
+  --brand-green: #58CC6A;
+  --brand-green-hover: #4FC763;
+  --brand-green-pressed: #43B75A;
+  --brand-green-disabled: #B8E9C2;
+
+  /* ── Background ── */
+  --bg-splash-start: #071A35;
+  --bg-splash-mid: #123C68;
+  --bg-splash-end: #2A5F8F;
+  --bg-welcome-start: #F8FFF8;
+  --bg-welcome-end: #EAFBF0;
+  --bg-warm-light: #F6D68A;
+
+  /* ── Surface (Light) ── */
+  --surface: #FFFFFF;
+  --card: #FFFFFF;
+  --section: #F3FBF5;
+
+  /* ── Text ── */
+  --text-primary: #2D3436;
+  --text-secondary: #6C757D;
+  --text-placeholder: #ADB5BD;
+  --text-inverse: #FFFFFF;
+
+  /* ── Semantic ── */
+  --semantic-success: #58CC6D;
+  --semantic-warning: #FFB84D;
+  --semantic-error: #FF6B6B;
+  --semantic-info: #5DA9FF;
+
+  /* ── Typography ── */
+  --font-family: 'Inter', 'PingFang SC', 'HarmonyOS Sans SC', -apple-system, sans-serif;
+  --font-display: 40px;
+  --font-h1: 32px;
+  --font-h2: 24px;
+  --font-body-lg: 18px;
+  --font-body: 16px;
+  --font-caption: 14px;
+  --font-tiny: 12px;
+
+  --leading-display: 48px;
+  --leading-h1: 40px;
+  --leading-h2: 32px;
+  --leading-body-lg: 28px;
+  --leading-body: 24px;
+  --leading-caption: 20px;
+  --leading-tiny: 16px;
+
+  /* ── Spacing (8px base) ── */
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-40: 40px;
+  --space-48: 48px;
+  --space-64: 64px;
+  --space-80: 80px;
+  --space-96: 96px;
+
+  /* ── Radius ── */
+  --radius-button: 999px;
+  --radius-card: 24px;
+  --radius-dialog: 28px;
+  --radius-input: 16px;
+  --radius-chip: 999px;
+
+  /* ── Shadow ── */
+  --shadow-elevation-1: 0px 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-elevation-2: 0px 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-elevation-3: 0px 16px 48px rgba(0, 0, 0, 0.16);
+  --shadow-button: 0px 4px 20px rgba(88, 204, 106, 0.15);
+
+  /* ── Motion ── */
+  --motion-fast: 150ms;
+  --motion-normal: 250ms;
+  --motion-medium: 400ms;
+  --motion-slow: 600ms;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  /* ── Layout ── */
+  --page-max-width: 430px;
+  --page-padding: 24px;
+  --button-height: 56px;
+}
