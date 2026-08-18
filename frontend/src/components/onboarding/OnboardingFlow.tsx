@@ -13,13 +13,15 @@ interface Props {
     examType: ExamType;
     examBatch: ExamBatch;
     dailyTime: DailyTime;
-  }) => void;
+  }) => Promise<boolean>;
 }
 
 export default function OnboardingFlow({ onComplete }: Props) {
   const [step, setStep] = useState(0);
   const [examType, setExamType] = useState<ExamType | null>(null);
   const [examBatch, setExamBatch] = useState<ExamBatch | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const next = () => setStep((s) => s + 1);
 
@@ -33,9 +35,15 @@ export default function OnboardingFlow({ onComplete }: Props) {
     next();
   };
 
-  const handleDailyTime = (v: DailyTime) => {
-    // Trigger completion on next tick so the animation settles
-    setTimeout(() => onComplete({ examType: examType!, examBatch: examBatch!, dailyTime: v }), 100);
+  const handleDailyTime = async (v: DailyTime) => {
+    setSubmitting(true);
+    setError(null);
+    const ok = await onComplete({ examType: examType!, examBatch: examBatch!, dailyTime: v });
+    if (!ok) {
+      setSubmitting(false);
+      setError('保存失败，请检查网络后重试。');
+    }
+    // On success, the parent switches stage and this component unmounts.
   };
 
   return (
@@ -98,11 +106,12 @@ export default function OnboardingFlow({ onComplete }: Props) {
                 ['20min', '20 分钟'],
                 ['30min+', '30 分钟以上'],
               ] as [DailyTime, string][]).map(([k, label]) => (
-                <button key={k} className="onboarding__btn" onClick={() => handleDailyTime(k)}>
+                <button key={k} className="onboarding__btn" disabled={submitting} onClick={() => handleDailyTime(k)}>
                   {label}
                 </button>
               ))}
             </div>
+            {error && <p className="onboarding__error">{error}</p>}
           </motion.div>
         )}
       </AnimatePresence>

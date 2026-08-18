@@ -22,8 +22,16 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
  */
 export async function ensureAnonymousSession(): Promise<string> {
   const { data: sessionData } = await supabase.auth.getSession();
-  if (sessionData.session?.user) {
-    return sessionData.session.user.id;
+  if (sessionData.session) {
+    // Verify the cached session is still valid server-side (auto-refresh
+    // handles expiry). A locally-present but revoked/expired session must not
+    // be mistaken for a working one.
+    const { data: userData, error } = await supabase.auth.getUser();
+    if (userData.user && !error) {
+      return userData.user.id;
+    }
+    // Broken session → clear it and fall through to a fresh anonymous sign-in.
+    await supabase.auth.signOut({ scope: 'local' });
   }
 
   const { data, error } = await supabase.auth.signInAnonymously();
@@ -44,4 +52,18 @@ export async function getAuthUserId(): Promise<string> {
     throw new Error('No authenticated session');
   }
   return uid;
+}
+
+/**
+ * Current session access token (JWT). Sent explicitly to Edge Functions so the
+ * Supabase platform can verify the caller's identity (verify_jwt=true).
+ * Call only after ensureAnonymousSession() has succeeded.
+ */
+export async function getAccessToken(): Promise<string> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) {
+    throw new Error('No authenticated session');
+  }
+  return token;
 }

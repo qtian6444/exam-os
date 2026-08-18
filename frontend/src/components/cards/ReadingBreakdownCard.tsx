@@ -34,7 +34,7 @@ export default function ReadingBreakdownCard({ data, onComplete }: Props) {
       setError(false);
 
       try {
-        const result = await getBreakdown(data.cardId, data.sentence);
+        const result = await getBreakdown(data.sentence);
         if (!cancelled) {
           setContent(result);
           setLoading(false);

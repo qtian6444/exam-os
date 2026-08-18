@@ -128,6 +128,18 @@ body {
   box-shadow: 0 0 24px var(--accent-glow);
 }
 
+.onboarding__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.onboarding__error {
+  margin-top: 16px;
+  font-size: 15px;
+  color: var(--error);
+  text-align: center;
+}
+
 /* ── Learning Shell ── */
 .learning-shell {
   width: 100%;
@@ -515,4 +527,15 @@ body {
 
 .auth-error button:hover {
   background: #7c6ff7;
+}
+
+/* ── Auth Loading ── */
+.auth-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: 24px;
+  text-align: center;
+  color: var(--text);
 }

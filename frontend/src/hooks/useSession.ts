@@ -27,13 +27,19 @@ export function useSession() {
   }, []);
 
   const startLearning = useCallback(
-    async (finalProfile: { examType: string; examBatch: string; dailyTime: string }) => {
-      // Persist user profile to Supabase
-      await upsertUserProfile({
+    async (finalProfile: { examType: string; examBatch: string; dailyTime: string }): Promise<boolean> => {
+      // Persist user profile to Supabase. If this critical write fails we must
+      // NOT advance to the learning stage — the user would otherwise think
+      // their progress is being saved when it is not.
+      const userId = await upsertUserProfile({
         examType: finalProfile.examType as any,
         examBatch: finalProfile.examBatch as any,
         dailyTime: finalProfile.dailyTime as any,
       });
+
+      if (!userId) {
+        return false;
+      }
 
       sessionRef.current = {
         sessionId: generateId(),
@@ -43,6 +49,7 @@ export function useSession() {
         actions: [],
       };
       setStage('learning' as AppStage);
+      return true;
     },
     [],
   );

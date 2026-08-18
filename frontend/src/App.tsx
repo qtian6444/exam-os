@@ -11,7 +11,7 @@ export default function App() {
 
   const handleOnboardingComplete = useCallback(
     (profile: { examType: ExamType; examBatch: ExamBatch; dailyTime: DailyTime }) => {
-      startLearning(profile);
+      return startLearning(profile);
     },
     [startLearning],
   );

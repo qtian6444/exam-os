@@ -5,9 +5,10 @@
 // `DEEPSEEK_API_KEY` (set via: supabase secrets set DEEPSEEK_API_KEY=sk-...).
 // The key never reaches the browser and is never returned in any response.
 //
-// Deploy: supabase functions deploy breakdown --no-verify-jwt
-// (no-verify-jwt because the frontend authenticates via Supabase Auth and
-//  we do not need to re-verify here; this function touches no user data).
+// JWT verification is ENABLED (Supabase default). Only a caller with a valid
+// Supabase Auth session JWT (e.g. an anonymous sign-in user) may invoke this
+// function. Do NOT deploy with --no-verify-jwt: that would expose the paid
+// DeepSeek capability to anyone holding only the public anon key.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
@@ -16,14 +17,21 @@ const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
 const API_URL = 'https://api.deepseek.com/v1/chat/completions';
 const MODEL = 'deepseek-v4-flash';
 
+// Paid-resource guards: input caps, upstream timeout, best-effort dedup.
+const MAX_SENTENCE_LENGTH = 500;
+const MAX_CONTEXT_LENGTH = 2000;
+const UPSTREAM_TIMEOUT_MS = 15_000;
+const DEDUP_TTL_MS = 60_000;
+const DEDUP_MAX_ENTRIES = 500;
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
 const RequestSchema = z.object({
-  sentence: z.string().min(1),
-  context: z.string().optional().default(''),
+  sentence: z.string().min(1).max(MAX_SENTENCE_LENGTH),
+  context: z.string().max(MAX_CONTEXT_LENGTH).optional().default(''),
 });
 
 const BreakdownSchema = z
@@ -148,6 +156,31 @@ function json(body: unknown, status: number): Response {
   });
 }
 
+// Extracts the auth.uid() ("sub" claim) from the session JWT in the
+// Authorization header. Signature verification is done by the Supabase
+// platform (verify_jwt=true); this is a cheap in-function read of the caller
+// identity for ownership/rate/dedup purposes, not a substitute for it.
+function getCallerUserId(req: Request): string | null {
+  const auth = req.headers.get('authorization') ?? '';
+  if (!auth.startsWith('Bearer ')) return null;
+  const token = auth.slice('Bearer '.length);
+  const payloadPart = token.split('.')[1];
+  if (!payloadPart) return null;
+  try {
+    const payload = JSON.parse(atob(payloadPart.replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof payload.sub === 'string' ? payload.sub : null;
+  } catch {
+    return null;
+  }
+}
+
+// Best-effort in-memory dedup (single-isolate lifetime, not cross-instance).
+const dedup = new Map<string, { at: number; breakdown: unknown }>();
+
+function dedupKey(userId: string, sentence: string, context: string): string {
+  return `${userId}::${sentence}::${context}`;
+}
+
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -155,6 +188,13 @@ serve(async (req: Request) => {
 
   if (req.method !== 'POST') {
     return json({ ok: false, error: { code: 'METHOD_NOT_ALLOWED', recoverable: false } }, 405);
+  }
+
+  const userId = getCallerUserId(req);
+  if (!userId) {
+    // Defense-in-depth: the platform already rejects missing/invalid JWTs when
+    // verify_jwt is on, but fail explicitly here too.
+    return json({ ok: false, error: { code: 'UNAUTHENTICATED', recoverable: false } }, 401);
   }
 
   // Secret not configured → fail explicitly, never silently.
@@ -176,8 +216,21 @@ serve(async (req: Request) => {
 
   const { sentence, context } = parsed.data;
 
+  // Dedup: return the cached result for an obvious repeat within the TTL.
+  const key = dedupKey(userId, sentence, context);
+  const hit = dedup.get(key);
+  if (hit && Date.now() - hit.at < DEDUP_TTL_MS) {
+    return json({ ok: true, breakdown: hit.breakdown }, 200);
+  }
+
+  // Upstream call with an explicit timeout — a hung DeepSeek response must not
+  // hold the request open indefinitely.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+
+  let resp: Response;
   try {
-    const resp = await fetch(API_URL, {
+    resp = await fetch(API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -192,37 +245,58 @@ serve(async (req: Request) => {
         temperature: 0.3,
         max_tokens: 1024,
       }),
+      signal: controller.signal,
     });
-
-    if (!resp.ok) {
-      // Stable, safe error code — never echo upstream body / headers.
-      return json({ ok: false, error: { code: 'DEEPSEEK_UPSTREAM_ERROR', recoverable: true } }, 502);
-    }
-
-    const data = await resp.json();
-    const rawText = data?.choices?.[0]?.message?.content;
-
-    if (!rawText || typeof rawText !== 'string') {
-      return json({ ok: false, error: { code: 'EMPTY_RESPONSE', recoverable: true } }, 502);
-    }
-
-    let jsonStr = rawText.trim();
-    if (jsonStr.startsWith('```')) {
-      jsonStr = jsonStr.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-    }
-
-    let parsedJson: unknown;
-    try {
-      parsedJson = JSON.parse(jsonStr);
-    } catch {
-      return json({ ok: false, error: { code: 'NON_JSON_RESPONSE', recoverable: true } }, 502);
-    }
-
-    const breakdown = BreakdownSchema.parse(parsedJson);
-    return json({ ok: true, breakdown }, 200);
   } catch (err) {
+    clearTimeout(timer);
+    if ((err as Error)?.name === 'AbortError') {
+      return json({ ok: false, error: { code: 'DEEPSEEK_TIMEOUT', recoverable: true } }, 504);
+    }
     // Never include err.message in the response (may leak internals).
-    console.error('[breakdown] internal error:', err);
+    console.error('[breakdown] upstream network error:', err);
     return json({ ok: false, error: { code: 'INTERNAL', recoverable: true } }, 500);
   }
+  clearTimeout(timer);
+
+  if (!resp.ok) {
+    // Stable, safe error code — never echo upstream body / headers.
+    return json({ ok: false, error: { code: 'DEEPSEEK_UPSTREAM_ERROR', recoverable: true } }, 502);
+  }
+
+  let data: unknown;
+  try {
+    data = await resp.json();
+  } catch {
+    return json({ ok: false, error: { code: 'EMPTY_RESPONSE', recoverable: true } }, 502);
+  }
+
+  const rawText = (data as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]
+    ?.message?.content;
+
+  if (!rawText || typeof rawText !== 'string') {
+    return json({ ok: false, error: { code: 'EMPTY_RESPONSE', recoverable: true } }, 502);
+  }
+
+  let jsonStr = rawText.trim();
+  if (jsonStr.startsWith('```')) {
+    jsonStr = jsonStr.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  }
+
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(jsonStr);
+  } catch {
+    return json({ ok: false, error: { code: 'NON_JSON_RESPONSE', recoverable: true } }, 502);
+  }
+
+  const breakdown = BreakdownSchema.parse(parsedJson);
+
+  // Cache successful result for dedup; keep the map bounded.
+  if (dedup.size >= DEDUP_MAX_ENTRIES) {
+    const oldestKey = dedup.keys().next().value;
+    if (oldestKey !== undefined) dedup.delete(oldestKey);
+  }
+  dedup.set(key, { at: Date.now(), breakdown });
+
+  return json({ ok: true, breakdown }, 200);
 });
