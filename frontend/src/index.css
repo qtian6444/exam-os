@@ -487,3 +487,32 @@ body {
 .session-complete__btn:hover {
   background: #7c6ff7;
 }
+
+/* ── Auth Error ── */
+.auth-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 100dvh;
+  padding: 24px;
+  text-align: center;
+  color: var(--text);
+}
+
+.auth-error button {
+  padding: 14px 40px;
+  font-size: 16px;
+  font-family: var(--font);
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.auth-error button:hover {
+  background: #7c6ff7;
+}

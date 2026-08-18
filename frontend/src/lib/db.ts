@@ -1,4 +1,4 @@
-import { supabase, getUserId } from './supabase';
+import { supabase, getAuthUserId } from './supabase';
 import type { ExamType, ExamBatch, DailyTime } from '../types';
 import {
   type AbilitySnapshot,
@@ -14,7 +14,7 @@ export async function upsertUserProfile(profile: {
   examBatch: ExamBatch;
   dailyTime: DailyTime;
 }): Promise<string | null> {
-  const userId = getUserId();
+  const userId = await getAuthUserId();
 
   const { error } = await supabase.from('user_profile').upsert(
     {
@@ -35,7 +35,7 @@ export async function upsertUserProfile(profile: {
 }
 
 export async function getAbilitySnapshot(): Promise<AbilitySnapshot> {
-  const userId = getUserId();
+  const userId = await getAuthUserId();
   const { data, error } = await supabase
     .from('user_profile')
     .select(
@@ -73,7 +73,7 @@ export interface RecordCardParams {
 }
 
 export async function insertLearningRecord(params: RecordCardParams): Promise<string | null> {
-  const userId = getUserId();
+  const userId = await getAuthUserId();
 
   const { data, error } = await supabase
     .from('learning_record')
@@ -103,7 +103,7 @@ export async function processAbilityEvidence(
   isCorrect: boolean,
   difficulty: number,
 ): Promise<EvidenceResult[]> {
-  const userId = getUserId();
+  const userId = await getAuthUserId();
 
   // Load current snapshot
   const snapshot = await getAbilitySnapshot();

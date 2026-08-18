@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
 import type { UserProfile, SessionData, AppStage } from '../types';
-import { getUserId } from '../lib/supabase';
 import { upsertUserProfile } from '../lib/db';
 
 function generateId(): string {
@@ -14,7 +13,6 @@ export function useSession() {
     examBatch: null,
     dailyTime: null,
   });
-  const [userId] = useState(() => getUserId());
 
   const sessionRef = useRef<SessionData>({
     sessionId: generateId(),
@@ -66,7 +64,6 @@ export function useSession() {
     stage,
     profile,
     session: sessionRef,
-    userId,
     updateProfile,
     startLearning,
     completeSession,
