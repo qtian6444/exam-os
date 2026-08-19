@@ -154,6 +154,12 @@ export function isProfileUpdateApplied(rows: { user_id: string }[] | null): bool
 
 export type ApplyEvidenceStatus = 'APPLIED_NEW' | 'IDEMPOTENT_ALREADY_APPLIED';
 
+// Bounded save deadline. A single RPC round-trip should settle in well under
+// a second on a healthy connection; 15s is a generous ceiling for weak / VPN /
+// high-latency networks while still guaranteeing the save UI can never be stuck
+// "saving" forever on a never-settling request (DNS stall / half-open socket).
+export const SAVE_TIMEOUT_MS = 15_000;
+
 export async function applyLearningEvidence(params: {
   sessionId: string;
   cardId: string;
@@ -167,34 +173,51 @@ export async function applyLearningEvidence(params: {
   // parameter, so no client-supplied identity can be forged.
   const operationId = await stableUuid(`${params.sessionId}::${params.cardId}`);
 
-  const { data, error } = await supabase.rpc('apply_learning_evidence', {
-    p_operation_id: operationId,
-    p_session_id: params.sessionId,
-    p_card_id: params.cardId,
-    p_card_type: params.cardType,
-    p_correct: params.correct,
-    p_user_answer: params.userAnswer ?? null,
-    p_skip_evidence: shouldSkipEvidence(params.cardType, params.cardId),
-    p_difficulty: getCardDifficulty(params.cardType),
-  });
+  // Real cancellation, not a Promise.race: .abortSignal() wires the controller's
+  // signal into the underlying fetch so the RPC actually stops on the deadline
+  // instead of leaving a dangling request running in the background forever.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
 
-  if (error) {
-    // The RPC raised one of the stable error codes (AUTH_REQUIRED,
-    // INVALID_PAYLOAD, PROFILE_NOT_FOUND, LEARNING_OPERATION_ID_COLLISION,
-    // ATOMIC_STATE_CONFLICT, PROFILE_UPDATE_FAILED). The transaction rolled
-    // back, so nothing was partially written. Surface as failure — never a
-    // silent "success".
-    console.error('[DB] applyLearningEvidence RPC failed:', error);
+  try {
+    const { data, error } = await supabase
+      .rpc('apply_learning_evidence', {
+        p_operation_id: operationId,
+        p_session_id: params.sessionId,
+        p_card_id: params.cardId,
+        p_card_type: params.cardType,
+        p_correct: params.correct,
+        p_user_answer: params.userAnswer ?? null,
+        p_skip_evidence: shouldSkipEvidence(params.cardType, params.cardId),
+        p_difficulty: getCardDifficulty(params.cardType),
+      })
+      .abortSignal(controller.signal);
+
+    if (error) {
+      // error covers a real RPC error code (AUTH_REQUIRED / INVALID_PAYLOAD /
+      // PROFILE_NOT_FOUND / LEARNING_OPERATION_ID_COLLISION /
+      // ATOMIC_STATE_CONFLICT / PROFILE_UPDATE_FAILED) AND a locally-aborted
+      // request (AbortError from the deadline). Both roll the transaction back /
+      // write nothing, so surface as failure — never a silent "success".
+      console.error('[DB] applyLearningEvidence RPC failed:', error);
+      return false;
+    }
+
+    const status = (data as { status?: string } | null)?.status;
+    if (status !== 'APPLIED_NEW' && status !== 'IDEMPOTENT_ALREADY_APPLIED') {
+      console.error('[DB] applyLearningEvidence unexpected status:', data);
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    // Defensive: some transport layers reject (rather than resolve-with-error)
+    // on abort. Treat any throw as a failure, never a silent "success".
+    console.error('[DB] applyLearningEvidence RPC threw:', err);
     return false;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  const status = (data as { status?: string } | null)?.status;
-  if (status !== 'APPLIED_NEW' && status !== 'IDEMPOTENT_ALREADY_APPLIED') {
-    console.error('[DB] applyLearningEvidence unexpected status:', data);
-    return false;
-  }
-
-  return true;
 }
 
 // ── Utility ──

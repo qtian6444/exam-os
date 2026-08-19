@@ -15,10 +15,21 @@ import {
   resolveAbilitySnapshot,
   isProfileUpdateApplied,
   applyLearningEvidence,
+  SAVE_TIMEOUT_MS,
   type ProfileAbilityRow,
 } from './db';
 
 const rpcMock = supabase.rpc as unknown as Mock;
+
+// applyLearningEvidence wires a bounded deadline through `.abortSignal()`. The
+// mock rpc returns a builder-shaped object whose `.abortSignal()` yields the
+// RPC's eventual `{ data, error }` (or settles on abort, mirroring the real
+// fetch-cancellation semantics).
+const abortSignalMock = vi.fn();
+
+function mockRpcResult(result: { data: unknown; error: unknown }): void {
+  abortSignalMock.mockResolvedValue(result);
+}
 
 describe('stableUuid (SHA-256 deterministic idempotency key)', () => {
   it('is deterministic: same seed → same UUID', async () => {
@@ -126,10 +137,12 @@ describe('isProfileUpdateApplied (0-rows ≠ success)', () => {
 describe('applyLearningEvidence (atomic RPC — single-call persistence)', () => {
   beforeEach(() => {
     rpcMock.mockReset();
+    abortSignalMock.mockReset();
+    rpcMock.mockReturnValue({ abortSignal: abortSignalMock });
   });
 
-  it('resolves true on APPLIED_NEW and forwards the full atomic payload', async () => {
-    rpcMock.mockResolvedValue({
+  it('resolves true on APPLIED_NEW and forwards the full logical payload', async () => {
+    mockRpcResult({
       data: { status: 'APPLIED_NEW', learning_record_id: 'lr', evidence_applied: true },
       error: null,
     });
@@ -144,6 +157,9 @@ describe('applyLearningEvidence (atomic RPC — single-call persistence)', () =>
 
     expect(ok).toBe(true);
     expect(rpcMock).toHaveBeenCalledTimes(1);
+    // Every authoritative logical input that the server fingerprints must be
+    // forwarded — a missing field would make the server-side fingerprint
+    // degenerate and a payload change could slip through as idempotent.
     expect(rpcMock).toHaveBeenCalledWith('apply_learning_evidence', expect.objectContaining({
       p_operation_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
       p_session_id: 's1',
@@ -157,7 +173,7 @@ describe('applyLearningEvidence (atomic RPC — single-call persistence)', () =>
   });
 
   it('resolves true on IDEMPOTENT_ALREADY_APPLIED (lost-response retry)', async () => {
-    rpcMock.mockResolvedValue({
+    mockRpcResult({
       data: { status: 'IDEMPOTENT_ALREADY_APPLIED', learning_record_id: 'lr', evidence_applied: false },
       error: null,
     });
@@ -173,7 +189,7 @@ describe('applyLearningEvidence (atomic RPC — single-call persistence)', () =>
   });
 
   it('resolves false when the RPC raises an error (transaction rolled back)', async () => {
-    rpcMock.mockResolvedValue({
+    mockRpcResult({
       data: null,
       error: { message: 'PROFILE_NOT_FOUND', code: 'P0001' },
     });
@@ -189,7 +205,7 @@ describe('applyLearningEvidence (atomic RPC — single-call persistence)', () =>
   });
 
   it('resolves false on an unexpected status (never a silent success)', async () => {
-    rpcMock.mockResolvedValue({ data: { status: 'WEIRD' }, error: null });
+    mockRpcResult({ data: { status: 'WEIRD' }, error: null });
 
     const ok = await applyLearningEvidence({
       sessionId: 's1',
@@ -202,7 +218,7 @@ describe('applyLearningEvidence (atomic RPC — single-call persistence)', () =>
   });
 
   it('forwards p_skip_evidence true + p_correct null for preference cards', async () => {
-    rpcMock.mockResolvedValue({
+    mockRpcResult({
       data: { status: 'APPLIED_NEW', learning_record_id: 'lr', evidence_applied: false },
       error: null,
     });
@@ -223,7 +239,7 @@ describe('applyLearningEvidence (atomic RPC — single-call persistence)', () =>
   });
 
   it('uses difficulty 0.6 for reorder cards', async () => {
-    rpcMock.mockResolvedValue({
+    mockRpcResult({
       data: { status: 'APPLIED_NEW', learning_record_id: 'lr', evidence_applied: true },
       error: null,
     });
@@ -240,5 +256,82 @@ describe('applyLearningEvidence (atomic RPC — single-call persistence)', () =>
       p_difficulty: 0.6,
       p_skip_evidence: false,
     }));
+  });
+
+  it('wires real cancellation via .abortSignal(AbortSignal) — not Promise.race', async () => {
+    mockRpcResult({ data: { status: 'APPLIED_NEW' }, error: null });
+
+    await applyLearningEvidence({
+      sessionId: 's1',
+      cardId: 'c1',
+      cardType: 'choice',
+      correct: true,
+    });
+
+    expect(rpcMock).toHaveBeenCalledTimes(1);
+    expect(abortSignalMock).toHaveBeenCalledTimes(1);
+    // The deadline must be a genuine AbortSignal handed to the fetch layer, so
+    // the underlying request is actually cancelled (not merely raced).
+    expect(abortSignalMock.mock.calls[0][0]).toBeInstanceOf(AbortSignal);
+  });
+
+  it('aborts a never-settling RPC after SAVE_TIMEOUT_MS and returns false', async () => {
+    vi.useFakeTimers();
+    try {
+      // Mirror real fetch-cancellation: the promise only settles (with an
+      // AbortError) once the signal aborts.
+      abortSignalMock.mockImplementation(
+        (signal: AbortSignal) =>
+          new Promise((resolve) => {
+            const onAbort = () =>
+              resolve({ data: null, error: { message: 'AbortError: The user aborted a request.' } });
+            if (signal.aborted) onAbort();
+            else signal.addEventListener('abort', onAbort);
+          }),
+      );
+
+      const pending = applyLearningEvidence({
+        sessionId: 's1',
+        cardId: 'c1',
+        cardType: 'choice',
+        correct: true,
+      });
+
+      // Flush the leading stableUuid microtask so the deadline timer is
+      // registered, then advance the clock past SAVE_TIMEOUT_MS to fire abort.
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS + 1);
+
+      await expect(pending).resolves.toBe(false);
+      expect(abortSignalMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('treats an abort (deadline) as failure — never a silent success', async () => {
+    mockRpcResult({ data: null, error: { message: 'AbortError: The user aborted a request.' } });
+
+    const ok = await applyLearningEvidence({
+      sessionId: 's1',
+      cardId: 'c1',
+      cardType: 'choice',
+      correct: true,
+    });
+
+    expect(ok).toBe(false);
+  });
+
+  it('retry of the same (session, card) forwards the SAME operation id', async () => {
+    mockRpcResult({ data: { status: 'APPLIED_NEW' }, error: null });
+
+    await applyLearningEvidence({ sessionId: 's1', cardId: 'c1', cardType: 'choice', correct: true });
+    await applyLearningEvidence({ sessionId: 's1', cardId: 'c1', cardType: 'choice', correct: true });
+
+    expect(rpcMock).toHaveBeenCalledTimes(2);
+    const first = rpcMock.mock.calls[0][1].p_operation_id;
+    const second = rpcMock.mock.calls[1][1].p_operation_id;
+    expect(typeof first).toBe('string');
+    expect(second).toBe(first);
   });
 });

@@ -37,6 +37,19 @@ ALTER TABLE ability_history
   ADD CONSTRAINT ability_history_record_ability_unique
   UNIQUE (learning_record_id, ability_key);
 
+-- ── learning_record: full logical operation fingerprint ──
+-- The deterministic operation id only identifies the (session, card) slot.
+-- It does NOT bind the payload, so changing card_type / correct / user_answer /
+-- skip_evidence / difficulty (or a mismatch between the operation id and the
+-- session/card it names) previously slipped through as a false idempotent
+-- success. This column stores a server-side digest over ALL authoritative
+-- logical inputs; a same-id retry is idempotent only when the digest matches.
+-- Nullable (not NOT NULL) so the pre-existing legacy rows stay intact; the
+-- RPC always writes it for new rows, and a NULL stored digest never matches a
+-- computed digest, so legacy rows hard-fail on collision rather than false-pass.
+ALTER TABLE learning_record
+  ADD COLUMN operation_fingerprint TEXT;
+
 -- ── RPC ──
 CREATE OR REPLACE FUNCTION apply_learning_evidence(
   p_operation_id  uuid,
@@ -68,6 +81,7 @@ DECLARE
   v_new_reading       real;
   v_new_reading_conf  real;
   v_history_id        uuid;
+  v_fingerprint       text;
 BEGIN
   -- STEP 1 — auth identity. The real owner is auth.uid(); the payload
   -- cannot name another user (there is deliberately no user_id param).
@@ -90,6 +104,29 @@ BEGIN
     RAISE EXCEPTION 'INVALID_PAYLOAD' USING ERRCODE = '22023';
   END IF;
 
+  -- Canonical operation fingerprint: ONE deterministic SHA-256 digest over
+  -- every authoritative logical input that can change this operation's effect
+  -- on learning_record / ability_history / user_profile. Computed server-side
+  -- (never trusted from the client). jsonb_build_array gives a structured,
+  -- unambiguous serialization (no delimiter collision, NULL vs '' distinct,
+  -- booleans distinct, JSON object keys ordered by jsonb). difficulty is
+  -- normalized to 6 decimals to pin the float representation.
+  v_fingerprint := encode(
+    digest(
+      jsonb_build_array(
+        p_session_id,
+        p_card_id,
+        p_card_type,
+        p_correct,
+        p_user_answer,
+        p_skip_evidence,
+        round(p_difficulty::numeric, 6)
+      )::text,
+      'sha256'
+    ),
+    'hex'
+  );
+
   -- STEP 3 — serialize this user's ability read-modify-write. FOR UPDATE
   -- takes a row lock so two different learning operations for the same
   -- user cannot both compute from the same stale snapshot (SCENARIO F),
@@ -107,9 +144,9 @@ BEGIN
 
   -- STEP 4 — learning_record idempotency via the deterministic operation id.
   INSERT INTO learning_record
-    (id, user_id, session_id, content_id, card_type, card_id, correct, user_answer)
+    (id, user_id, session_id, content_id, card_type, card_id, correct, user_answer, operation_fingerprint)
   VALUES
-    (p_operation_id, v_uid, p_session_id, NULL, p_card_type, p_card_id, p_correct, p_user_answer)
+    (p_operation_id, v_uid, p_session_id, NULL, p_card_type, p_card_id, p_correct, p_user_answer, v_fingerprint)
   ON CONFLICT (id) DO NOTHING
   RETURNING * INTO v_record;
 
@@ -120,19 +157,21 @@ BEGIN
 
     IF v_existing.id IS NOT NULL
        AND v_existing.user_id = v_uid
-       AND v_existing.session_id = p_session_id
-       AND v_existing.card_id = p_card_id THEN
-      -- SCENARIO B / H: same logical operation → idempotent success.
-      -- ability_history + user_profile committed in the SAME transaction as
-      -- learning_record, so their presence is implied; do NOT apply again.
+       AND v_existing.operation_fingerprint = v_fingerprint THEN
+      -- SCENARIO B / H: same logical operation — the full payload digest
+      -- matches, so this is a retry of an already-applied event. ability_history
+      -- + user_profile committed in the SAME transaction as learning_record, so
+      -- their presence is implied; do NOT apply again.
       RETURN jsonb_build_object(
         'status', 'IDEMPOTENT_ALREADY_APPLIED',
         'learning_record_id', v_existing.id::text,
         'evidence_applied', false
       );
     ELSE
-      -- SCENARIO G / H: same PK, different operation (or an unreadable/
-      -- cross-user row blocked by RLS). Hard-fail, never swallow.
+      -- SCENARIO G / H: same PK but a DIFFERENT logical payload (any of
+      -- session_id / card_id / card_type / correct / user_answer / skip_evidence
+      -- / difficulty differs), or a cross-user row blocked by RLS (v_existing.id
+      -- NULL), or a NULL stored digest (legacy row). Hard-fail, never swallow.
       RAISE EXCEPTION 'LEARNING_OPERATION_ID_COLLISION' USING ERRCODE = 'P0001';
     END IF;
   END IF;
