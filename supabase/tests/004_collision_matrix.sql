@@ -4,13 +4,16 @@
 -- Verifies apply_learning_evidence (migration 004, R6) against the full
 -- operation-identity and atomic-completion matrix required by Engineering QA.
 --
--- Run AFTER migrations 001..004 are applied. This is a psql script (it uses
+-- Run AFTER migrations 001..005 are applied (005 replaces the RPC with the
+-- R7-hardened SECURITY DEFINER). This is a psql script (it uses
 -- \set / \echo meta-commands), so run it with the psql client against the
 -- Supabase Postgres database:
 --   psql "$DATABASE_URL" -f supabase/tests/004_collision_matrix.sql
 --   (DATABASE_URL = Supabase Postgres connection string from Dashboard →
---    Settings → Database → Connection string. A clean run prints 18 PASS
---    NOTICE lines then `R6 collision matrix: ALL PASS`.)
+--    Settings → Database → Connection string. A clean run prints 19 PASS
+--    NOTICE lines then `R6 collision matrix: ALL PASS` and exits 0. Any
+--    uncaught FAIL aborts the whole script with a non-zero exit status —
+--    never a false green.)
 --
 -- Auth simulation: the RPC is SECURITY DEFINER, so it bypasses RLS, but
 -- auth.uid() still reads the request JWT claim. This script sets
@@ -19,7 +22,9 @@
 -- (plural) instead, set that GUC to '{"sub":"<uuid>"}'.
 --
 -- Every scenario asserts via RAISE EXCEPTION on failure; a clean run prints
--- only "N PASS" NOTICE lines. Any FAIL aborts the transaction with a message.
+-- only "N PASS" NOTICE lines. `\set ON_ERROR_STOP on` (set below) means any
+-- UNCAUGHT failure aborts the whole script with a non-zero exit status, so a
+-- failing scenario can never be reported as "ALL PASS".
 -- ============================================================
 
 -- ── Test fixtures (fixed UUIDs; auth.uid() only reads the claim, not auth.users) ──
@@ -28,12 +33,18 @@
 \set OP1    '11111111-1111-1111-1111-111111111111'
 \set OP2    '22222222-2222-2222-2222-222222222222'
 
+-- Fail-fast: an uncaught test failure must abort the whole script with a
+-- non-zero exit, never fall through to the final "ALL PASS" echo. psql's
+-- default is ON_ERROR_STOP=off, which would silently turn any FAIL into a
+-- false green — the exact R6 Self-Red-Team finding closed here (R7-C).
+\set ON_ERROR_STOP on
+
 -- Profiles must exist for the RPC (it raises PROFILE_NOT_FOUND otherwise).
 -- Run as the script owner (postgres/superuser, which bypasses RLS) for setup.
 INSERT INTO user_profile (user_id) VALUES (:'USER_A') ON CONFLICT (user_id) DO NOTHING;
 INSERT INTO user_profile (user_id) VALUES (:'USER_B') ON CONFLICT (user_id) DO NOTHING;
 
--- ═══ SCENARIO 1..14: USER_A, base payload = choice/true/{"selectedOptionId":"a"}/skip=false/difficulty=0.4 ═══
+-- ═══ SCENARIO 1..12: USER_A, base payload = choice/true/{"selectedOptionId":"a"}/skip=false/difficulty=0.4 ═══
 BEGIN;
   SET LOCAL "request.jwt.claim.sub" = :'USER_A';
 
@@ -185,18 +196,33 @@ BEGIN;
   END $$;
 ROLLBACK;
 
--- ═══ SCENARIO 14: lost-response-equivalent retry (fresh apply then retry) ═══
+-- ═══ SCENARIO 14: lost-response retry across transactions ═══
+-- The first apply COMMITS in its own transaction; the client then retries the
+-- SAME logical operation in a NEW transaction. The RPC must dedupe against the
+-- committed row — the real lost-response path, not an in-transaction retry.
 BEGIN;
   SET LOCAL "request.jwt.claim.sub" = :'USER_A';
   DO $$
-  DECLARE r jsonb;
+  DECLARE r1 jsonb;
   BEGIN
-    PERFORM apply_learning_evidence(:'OP2','sess-2','card-2','reorder',false,'{"orderedChunkIds":["c","b","a"]}',false,0.6);
-    r := apply_learning_evidence(:'OP2','sess-2','card-2','reorder',false,'{"orderedChunkIds":["c","b","a"]}',false,0.6);
-    IF r->>'status' IS DISTINCT FROM 'IDEMPOTENT_ALREADY_APPLIED' THEN
-      RAISE EXCEPTION 'TEST 14 FAIL: %', r;
+    r1 := apply_learning_evidence(:'OP2','sess-2','card-2','reorder',false,'{"orderedChunkIds":["c","b","a"]}',false,0.6);
+    IF r1->>'status' IS DISTINCT FROM 'APPLIED_NEW' THEN
+      RAISE EXCEPTION 'TEST 14 FAIL (first apply): %', r1;
     END IF;
-    RAISE NOTICE 'TEST 14 PASS (lost-response retry idempotent)';
+    RAISE NOTICE 'TEST 14a PASS (first apply APPLIED_NEW)';
+  END $$;
+COMMIT;
+
+BEGIN;
+  SET LOCAL "request.jwt.claim.sub" = :'USER_A';
+  DO $$
+  DECLARE r2 jsonb;
+  BEGIN
+    r2 := apply_learning_evidence(:'OP2','sess-2','card-2','reorder',false,'{"orderedChunkIds":["c","b","a"]}',false,0.6);
+    IF r2->>'status' IS DISTINCT FROM 'IDEMPOTENT_ALREADY_APPLIED' THEN
+      RAISE EXCEPTION 'TEST 14 FAIL (retry): %', r2;
+    END IF;
+    RAISE NOTICE 'TEST 14b PASS (committed retry idempotent)';
   END $$;
 COMMIT;
 
@@ -215,9 +241,9 @@ BEGIN;
   END $$;
 COMMIT;
 
--- ═══ SCENARIO 16: rollback on profile failure (no partial state) ═══
--- A user with NO profile row → PROFILE_NOT_FOUND, and learning_record must not
--- be left behind.
+-- ═══ SCENARIO 16: missing profile → hard-fail before any write ═══
+-- A user with NO profile row → PROFILE_NOT_FOUND is raised at STEP 3, BEFORE
+-- the learning_record / ability_history writes, so no row is ever created.
 BEGIN;
   SET LOCAL "request.jwt.claim.sub" = '55555555-5555-5555-5555-555555555555';
   DO $$
@@ -230,9 +256,9 @@ BEGIN;
       IF SQLERRM LIKE '%PROFILE_NOT_FOUND%' THEN NULL; ELSE RAISE; END IF;
     END;
     IF EXISTS (SELECT 1 FROM learning_record WHERE id = '66666666-6666-6666-6666-666666666666') THEN
-      RAISE EXCEPTION 'TEST 16 FAIL: learning_record was not rolled back';
+      RAISE EXCEPTION 'TEST 16 FAIL: learning_record was created despite PROFILE_NOT_FOUND';
     END IF;
-    RAISE NOTICE 'TEST 16 PASS (rollback on profile failure)';
+    RAISE NOTICE 'TEST 16 PASS (profile-not-found fails before any write)';
   END $$;
 COMMIT;
 
