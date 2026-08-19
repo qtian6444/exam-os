@@ -1,13 +1,11 @@
 -- ============================================================
--- Exam OS — P0-SECURITY-R4: Atomic learning evidence transaction
+-- Exam OS — P0-SECURITY-R6: Atomic learning evidence transaction
 --
--- Closes ENG-R3-004 / SPEC_CONFLICT_ATOMIC_LEARNING_WRITE.
+-- Closes ENG-R3-004 (atomic write) and the R5 Engineering QA blockers
+-- ENG-R5-001..004.
 --
--- Replaces the client-side multi-step write:
---     learning_record  →  ability_history  →  user_profile
--- with a single PostgreSQL function invocation that runs the same
--- write chain inside ONE transaction, so a learning event applies its
--- ability evidence exactly once:
+-- A learning event applies its ability evidence exactly once, inside ONE
+-- transaction that writes learning_record + ability_history + user_profile:
 --   - retry-safe            (SCENARIO B)
 --   - lost-response-safe    (SCENARIO B)
 --   - concurrent-safe       (SCENARIO E / F)
@@ -15,17 +13,28 @@
 --   - no lost update        (SCENARIO F)
 --   - no sixth core table   (function only, no new table)
 --
--- SECURITY INVOKER: runs as the calling user. Existing RLS ownership
--- policies remain the ONLY authority. The identity is auth.uid(); the
--- payload carries no controllable user_id. No service_role, no
--- SECURITY DEFINER, no cross-user write path.
+-- R6 operation identity = TYPED FIELD COMPARISON (not a hash fingerprint):
+--   - difficulty compared with native REAL/float4 semantics (no round/truncate)
+--   - user_answer compared with native jsonb equality (no text
+--     canonicalization, no delimiter ambiguity, SQL NULL != json 'null')
+--   - NULL handled by IS NOT DISTINCT FROM
+--   - no pgcrypto / digest dependency
+--
+-- R6 atomic-completion proof:
+--   Direct client INSERT on learning_record / ability_history is REMOVED
+--   (policies dropped below). The RPC is SECURITY DEFINER so it can still
+--   write them, and it is now the ONLY writer. Because the RPC writes all
+--   three tables in one transaction, "a learning_record row exists" proves
+--   the whole operation committed — a forged/pre-inserted record can no
+--   longer masquerade as IDEMPOTENT_ALREADY_APPLIED.
+--
+-- SECURITY DEFINER is tightly scoped: the owner is auth.uid() (read from the
+-- request JWT, independent of the function owner); there is no user_id
+-- parameter, so the function cannot be directed at another user's rows.
+-- No service_role, no cross-user write path.
 --
 -- Run via Supabase SQL Editor (or `supabase db push`).
 -- ============================================================
-
--- gen_random_uuid() is already used by migration 001; ensure the
--- extension that provides it.
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- ── ability_history: one evidence row per (record, ability) ──
 -- Gives the atomic path a deterministic uniqueness boundary so an
@@ -37,18 +46,24 @@ ALTER TABLE ability_history
   ADD CONSTRAINT ability_history_record_ability_unique
   UNIQUE (learning_record_id, ability_key);
 
--- ── learning_record: full logical operation fingerprint ──
--- The deterministic operation id only identifies the (session, card) slot.
--- It does NOT bind the payload, so changing card_type / correct / user_answer /
--- skip_evidence / difficulty (or a mismatch between the operation id and the
--- session/card it names) previously slipped through as a false idempotent
--- success. This column stores a server-side digest over ALL authoritative
--- logical inputs; a same-id retry is idempotent only when the digest matches.
--- Nullable (not NOT NULL) so the pre-existing legacy rows stay intact; the
--- RPC always writes it for new rows, and a NULL stored digest never matches a
--- computed digest, so legacy rows hard-fail on collision rather than false-pass.
+-- ── learning_record: persist the full authoritative logical payload ──
+-- The duplicate-operation-id branch re-derives identity by comparing the
+-- PERSISTED authoritative fields against the incoming parameters with native
+-- PostgreSQL typed semantics. skip_evidence and difficulty were not previously
+-- stored, so they are added here. Nullable: pre-existing legacy rows keep NULL,
+-- which never matches a validated incoming value (safe hard-fail on retry).
 ALTER TABLE learning_record
-  ADD COLUMN operation_fingerprint TEXT;
+  ADD COLUMN skip_evidence BOOLEAN;
+ALTER TABLE learning_record
+  ADD COLUMN difficulty REAL;
+
+-- ── Remove direct client write paths to the authoritative operation tables ──
+-- The client may no longer INSERT learning_record / ability_history directly;
+-- only the SECURITY DEFINER RPC can (bypassing RLS), so a row's existence
+-- proves the full atomic apply ran. SELECT (read) policies remain for the
+-- client, and user_profile SELECT/INSERT/UPDATE remain for onboarding.
+DROP POLICY IF EXISTS "learning_record_insert_own" ON learning_record;
+DROP POLICY IF EXISTS "ability_history_insert_own" ON ability_history;
 
 -- ── RPC ──
 CREATE OR REPLACE FUNCTION apply_learning_evidence(
@@ -63,7 +78,7 @@ CREATE OR REPLACE FUNCTION apply_learning_evidence(
 )
 RETURNS jsonb
 LANGUAGE plpgsql
-SECURITY INVOKER
+SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
@@ -81,10 +96,10 @@ DECLARE
   v_new_reading       real;
   v_new_reading_conf  real;
   v_history_id        uuid;
-  v_fingerprint       text;
 BEGIN
-  -- STEP 1 — auth identity. The real owner is auth.uid(); the payload
-  -- cannot name another user (there is deliberately no user_id param).
+  -- STEP 1 — auth identity. The real owner is auth.uid() (read from the
+  -- request JWT, independent of SECURITY DEFINER). There is deliberately no
+  -- user_id param, so the payload cannot name another user.
   IF v_uid IS NULL THEN
     RAISE EXCEPTION 'AUTH_REQUIRED' USING ERRCODE = '28000';
   END IF;
@@ -104,29 +119,6 @@ BEGIN
     RAISE EXCEPTION 'INVALID_PAYLOAD' USING ERRCODE = '22023';
   END IF;
 
-  -- Canonical operation fingerprint: ONE deterministic SHA-256 digest over
-  -- every authoritative logical input that can change this operation's effect
-  -- on learning_record / ability_history / user_profile. Computed server-side
-  -- (never trusted from the client). jsonb_build_array gives a structured,
-  -- unambiguous serialization (no delimiter collision, NULL vs '' distinct,
-  -- booleans distinct, JSON object keys ordered by jsonb). difficulty is
-  -- normalized to 6 decimals to pin the float representation.
-  v_fingerprint := encode(
-    digest(
-      jsonb_build_array(
-        p_session_id,
-        p_card_id,
-        p_card_type,
-        p_correct,
-        p_user_answer,
-        p_skip_evidence,
-        round(p_difficulty::numeric, 6)
-      )::text,
-      'sha256'
-    ),
-    'hex'
-  );
-
   -- STEP 3 — serialize this user's ability read-modify-write. FOR UPDATE
   -- takes a row lock so two different learning operations for the same
   -- user cannot both compute from the same stale snapshot (SCENARIO F),
@@ -144,9 +136,9 @@ BEGIN
 
   -- STEP 4 — learning_record idempotency via the deterministic operation id.
   INSERT INTO learning_record
-    (id, user_id, session_id, content_id, card_type, card_id, correct, user_answer, operation_fingerprint)
+    (id, user_id, session_id, content_id, card_type, card_id, correct, user_answer, skip_evidence, difficulty)
   VALUES
-    (p_operation_id, v_uid, p_session_id, NULL, p_card_type, p_card_id, p_correct, p_user_answer, v_fingerprint)
+    (p_operation_id, v_uid, p_session_id, NULL, p_card_type, p_card_id, p_correct, p_user_answer, p_skip_evidence, p_difficulty)
   ON CONFLICT (id) DO NOTHING
   RETURNING * INTO v_record;
 
@@ -157,21 +149,27 @@ BEGIN
 
     IF v_existing.id IS NOT NULL
        AND v_existing.user_id = v_uid
-       AND v_existing.operation_fingerprint = v_fingerprint THEN
-      -- SCENARIO B / H: same logical operation — the full payload digest
-      -- matches, so this is a retry of an already-applied event. ability_history
-      -- + user_profile committed in the SAME transaction as learning_record, so
-      -- their presence is implied; do NOT apply again.
+       AND v_existing.session_id IS NOT DISTINCT FROM p_session_id
+       AND v_existing.card_id IS NOT DISTINCT FROM p_card_id
+       AND v_existing.card_type IS NOT DISTINCT FROM p_card_type
+       AND v_existing.correct IS NOT DISTINCT FROM p_correct
+       AND v_existing.user_answer IS NOT DISTINCT FROM p_user_answer
+       AND v_existing.skip_evidence IS NOT DISTINCT FROM p_skip_evidence
+       AND v_existing.difficulty IS NOT DISTINCT FROM p_difficulty THEN
+      -- SCENARIO B / H: same logical operation — every authoritative field
+      -- matches under native typed equality (float4 for REAL, jsonb equality
+      -- for user_answer, IS NOT DISTINCT FROM for NULL). Because the RPC is
+      -- the only writer and it applies ability_history + user_profile in the
+      -- SAME transaction, their presence is implied; do NOT apply again.
       RETURN jsonb_build_object(
         'status', 'IDEMPOTENT_ALREADY_APPLIED',
         'learning_record_id', v_existing.id::text,
         'evidence_applied', false
       );
     ELSE
-      -- SCENARIO G / H: same PK but a DIFFERENT logical payload (any of
-      -- session_id / card_id / card_type / correct / user_answer / skip_evidence
-      -- / difficulty differs), or a cross-user row blocked by RLS (v_existing.id
-      -- NULL), or a NULL stored digest (legacy row). Hard-fail, never swallow.
+      -- SCENARIO G / H: same PK but a DIFFERENT logical payload (any
+      -- authoritative field differs under native typed equality), or a
+      -- cross-user row (user_id mismatch). Hard-fail, never swallow.
       RAISE EXCEPTION 'LEARNING_OPERATION_ID_COLLISION' USING ERRCODE = 'P0001';
     END IF;
   END IF;
@@ -318,9 +316,11 @@ END;
 $$;
 
 -- ── Grants ──
--- SECURITY INVOKER runs as the caller; RLS enforces ownership. Remove the
--- default PUBLIC execute, then grant to authenticated (and anon, so an
--- unauthenticated call reaches AUTH_REQUIRED instead of a permission error).
+-- The RPC is SECURITY DEFINER (runs as the function owner, bypassing RLS) but
+-- ownership is still auth.uid() and there is no user_id param, so it can only
+-- ever write the calling user's rows. Remove the default PUBLIC execute, then
+-- grant to authenticated (and anon, so an unauthenticated call reaches
+-- AUTH_REQUIRED instead of a permission error).
 REVOKE ALL ON FUNCTION apply_learning_evidence(
   uuid, text, text, text, boolean, jsonb, boolean, real
 ) FROM PUBLIC;
