@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import type { LearningCard, CardType } from '../types';
 import { getNextCard, getTotalCards } from '../data/mock';
@@ -18,12 +18,23 @@ interface Props {
   sessionId: string;
 }
 
+type PersistPayload = {
+  cardType: 'choice' | 'reading_breakdown' | 'reorder';
+  cardId: string;
+  correct: boolean | null;
+  userAnswer?: unknown;
+};
+
 export default function LearningShell({ onComplete, sessionId }: Props) {
   const [currentCard, setCurrentCard] = useState<LearningCard | null>(null);
   const [cardKey, setCardKey] = useState(0);
   const [cardsDone, setCardsDone] = useState(0);
   const [startTime] = useState(() => Date.now());
   const [totalCards] = useState(() => getTotalCards());
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const savingRef = useRef(false);
+  const pendingRef = useRef<{ payload: PersistPayload; advanceFn: () => void } | null>(null);
 
   const advance = useCallback(() => {
     const next = getNextCard();
@@ -41,30 +52,65 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
     advance();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Persist card result + compute ability evidence (async, fire-and-forget)
-  const persistCard = useCallback(
-    async (
-      cardType: string,
-      cardId: string,
-      correct: boolean | null,
-      userAnswer?: unknown,
-    ) => {
+  // Persist a card result + ability evidence. Returns true only if every
+  // critical write succeeded — otherwise progression must be blocked, never
+  // silently treated as saved.
+  const persist = useCallback(
+    async (payload: PersistPayload): Promise<boolean> => {
       const recordId = await insertLearningRecord({
         sessionId,
-        cardId,
-        cardType: cardType as 'choice' | 'reading_breakdown' | 'reorder',
-        correct,
-        userAnswer,
+        cardId: payload.cardId,
+        cardType: payload.cardType,
+        correct: payload.correct,
+        userAnswer: payload.userAnswer,
       });
 
-      // If card should produce ability evidence, compute and write
-      if (recordId && !shouldSkipEvidence(cardType, cardId) && correct !== null) {
-        const difficulty = getCardDifficulty(cardType);
-        await processAbilityEvidence(recordId, cardType, correct, difficulty);
+      if (!recordId) return false;
+
+      if (!shouldSkipEvidence(payload.cardType, payload.cardId) && payload.correct !== null) {
+        const ok = await processAbilityEvidence(
+          recordId,
+          payload.cardType,
+          payload.correct,
+          getCardDifficulty(payload.cardType),
+        );
+        if (!ok) return false;
       }
+
+      return true;
     },
     [sessionId],
   );
+
+  const saveAndAdvance = useCallback(
+    async (payload: PersistPayload, advanceFn: () => void) => {
+      if (savingRef.current) return; // guard against rapid double-fire
+      savingRef.current = true;
+      pendingRef.current = { payload, advanceFn };
+      setSaving(true);
+
+      const ok = await persist(payload);
+
+      if (ok) {
+        pendingRef.current = null;
+        savingRef.current = false;
+        setSaving(false);
+        setSaveError(false);
+        advanceFn();
+      } else {
+        savingRef.current = false;
+        setSaving(false);
+        setSaveError(true);
+      }
+    },
+    [persist],
+  );
+
+  const retrySave = useCallback(() => {
+    const pending = pendingRef.current;
+    if (!pending) return;
+    saveAndAdvance(pending.payload, pending.advanceFn);
+  }, [saveAndAdvance]);
 
   const handleChoice = useCallback(
     (optionId: string) => {
@@ -74,20 +120,33 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
           ? optionId === card.correctOptionId
           : null; // preference cards: null
 
-      persistCard('choice', card.cardId, isCorrect, { selectedOptionId: optionId });
-      setCardsDone((n) => n + 1);
-      advance();
+      saveAndAdvance(
+        {
+          cardType: 'choice',
+          cardId: card.cardId,
+          correct: isCorrect,
+          userAnswer: { selectedOptionId: optionId },
+        },
+        () => {
+          setCardsDone((n) => n + 1);
+          advance();
+        },
+      );
     },
-    [currentCard, advance, persistCard],
+    [currentCard, saveAndAdvance, advance],
   );
 
   const handleBreakdownComplete = useCallback(() => {
     const card = currentCard as any;
     // ReadingBreakdown: no correctness, just log
-    persistCard('reading_breakdown', card.cardId, null, null);
-    setCardsDone((n) => n + 1);
-    advance();
-  }, [currentCard, advance, persistCard]);
+    saveAndAdvance(
+      { cardType: 'reading_breakdown', cardId: card.cardId, correct: null, userAnswer: null },
+      () => {
+        setCardsDone((n) => n + 1);
+        advance();
+      },
+    );
+  }, [currentCard, saveAndAdvance, advance]);
 
   const handleReorderSubmit = useCallback(
     (orderedIds: string[]) => {
@@ -96,12 +155,21 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
         orderedIds.length === card.correctOrder.length &&
         orderedIds.every((id: string, i: number) => id === card.correctOrder[i]);
 
-      persistCard('reorder', card.cardId, isCorrect, { orderedChunkIds: orderedIds });
-      setCardsDone((n) => n + 1);
-      // Wait so user sees result, then advance
-      setTimeout(() => advance(), 2000);
+      saveAndAdvance(
+        {
+          cardType: 'reorder',
+          cardId: card.cardId,
+          correct: isCorrect,
+          userAnswer: { orderedChunkIds: orderedIds },
+        },
+        () => {
+          setCardsDone((n) => n + 1);
+          // Wait so user sees result, then advance
+          setTimeout(() => advance(), 2000);
+        },
+      );
     },
-    [currentCard, advance, persistCard],
+    [currentCard, saveAndAdvance, advance],
   );
 
   if (!currentCard) {
@@ -151,6 +219,15 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
           {cardsDone + 1}/{totalCards}
         </span>
       </div>
+
+      {saveError && (
+        <div className="learning-shell__save-error">
+          <p>保存失败，请检查网络后重试。</p>
+          <button onClick={retrySave} disabled={saving}>
+            {saving ? '保存中…' : '重试'}
+          </button>
+        </div>
+      )}
 
       <div className="learning-shell__card-area">
         <AnimatePresence mode="wait">{renderCard()}</AnimatePresence>

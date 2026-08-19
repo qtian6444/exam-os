@@ -31,11 +31,17 @@ export function useSession() {
       // Persist user profile to Supabase. If this critical write fails we must
       // NOT advance to the learning stage — the user would otherwise think
       // their progress is being saved when it is not.
-      const userId = await upsertUserProfile({
-        examType: finalProfile.examType as any,
-        examBatch: finalProfile.examBatch as any,
-        dailyTime: finalProfile.dailyTime as any,
-      });
+      let userId: string | null;
+      try {
+        userId = await upsertUserProfile({
+          examType: finalProfile.examType as any,
+          examBatch: finalProfile.examBatch as any,
+          dailyTime: finalProfile.dailyTime as any,
+        });
+      } catch (err) {
+        console.error('[Session] upsertUserProfile threw:', err);
+        return false;
+      }
 
       if (!userId) {
         return false;

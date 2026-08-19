@@ -2,7 +2,7 @@ import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
-import { ensureAnonymousSession } from './lib/supabase'
+import { ensureAnonymousSession, resetAnonymousSessionInit } from './lib/supabase'
 
 const AUTH_TIMEOUT_MS = 12_000
 
@@ -50,7 +50,16 @@ function Bootstrap() {
     return (
       <div className="auth-error">
         <p>无法建立安全会话，请检查网络后重试。</p>
-        <button onClick={() => setAttempt((a) => a + 1)}>重试</button>
+        <button
+          onClick={() => {
+            // Abandon any still-in-flight attempt so its late resolution can
+            // never overwrite the fresh attempt we're about to start.
+            resetAnonymousSessionInit();
+            setAttempt((a) => a + 1);
+          }}
+        >
+          重试
+        </button>
       </div>
     )
   }

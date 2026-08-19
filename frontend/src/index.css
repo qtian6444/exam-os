@@ -172,6 +172,42 @@ body {
   flex-direction: column;
 }
 
+.learning-shell__save-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  background: rgba(225, 112, 85, 0.12);
+  border: 1px solid var(--error);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  color: var(--error);
+}
+
+.learning-shell__save-error button {
+  padding: 8px 18px;
+  font-size: 14px;
+  font-family: var(--font);
+  font-weight: 600;
+  color: #fff;
+  background: var(--error);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.learning-shell__save-error button:hover {
+  opacity: 0.9;
+}
+
+.learning-shell__save-error button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ── Session Timer ── */
 .session-timer {
   font-size: 14px;

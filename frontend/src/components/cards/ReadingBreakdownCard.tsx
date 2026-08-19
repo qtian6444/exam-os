@@ -28,13 +28,14 @@ export default function ReadingBreakdownCard({ data, onComplete }: Props) {
     }
 
     let cancelled = false;
+    const controller = new AbortController();
 
     async function fetchBreakdown() {
       setLoading(true);
       setError(false);
 
       try {
-        const result = await getBreakdown(data.sentence);
+        const result = await getBreakdown(data.sentence, '', { signal: controller.signal });
         if (!cancelled) {
           setContent(result);
           setLoading(false);
@@ -50,6 +51,7 @@ export default function ReadingBreakdownCard({ data, onComplete }: Props) {
     fetchBreakdown();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [data.cardId, data.content, data.sentence]);
 

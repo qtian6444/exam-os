@@ -2,10 +2,32 @@ import { supabase, getAuthUserId } from './supabase';
 import type { ExamType, ExamBatch, DailyTime } from '../types';
 import {
   type AbilitySnapshot,
-  type EvidenceResult,
   computeEvidence,
   blankSnapshot,
 } from './ability';
+
+// ── Idempotency key helper ──
+
+// Deterministic RFC-4122-shaped UUID from a string seed. Used to give
+// learning_record / ability_history inserts a stable PK across retries, so a
+// re-attempt after a partially-acknowledged write can never manufacture a
+// duplicate row — without adding a new unique constraint to any core table.
+function fnv1a(str: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
+}
+
+function stableUuid(seed: string): string {
+  const a = fnv1a(seed + '#a').toString(16).padStart(8, '0');
+  const b = fnv1a(seed + '#b').toString(16).padStart(8, '0');
+  const c = fnv1a(seed + '#c').toString(16).padStart(8, '0');
+  const d = fnv1a(seed + '#d').toString(16).padStart(8, '0');
+  return `${a}-${b.slice(0, 4)}-${b.slice(4)}-${c.slice(0, 4)}-${c.slice(4)}${d}`;
+}
 
 // ── User Profile ──
 
@@ -75,9 +97,14 @@ export interface RecordCardParams {
 export async function insertLearningRecord(params: RecordCardParams): Promise<string | null> {
   const userId = await getAuthUserId();
 
+  // Stable PK so a retry of the same (session, card) reuses the same row rather
+  // than inserting a duplicate.
+  const id = stableUuid(`${params.sessionId}::${params.cardId}`);
+
   const { data, error } = await supabase
     .from('learning_record')
     .insert({
+      id,
       user_id: userId,
       session_id: params.sessionId,
       card_id: params.cardId,
@@ -89,6 +116,9 @@ export async function insertLearningRecord(params: RecordCardParams): Promise<st
     .single();
 
   if (error) {
+    // 23505 = PK already exists from a prior (partially-acknowledged) attempt.
+    // Idempotent success, not a new row.
+    if (error.code === '23505') return id;
     console.error('[DB] insertLearningRecord failed:', error);
     return null;
   }
@@ -102,7 +132,7 @@ export async function processAbilityEvidence(
   cardType: string,
   isCorrect: boolean,
   difficulty: number,
-): Promise<EvidenceResult[]> {
+): Promise<boolean> {
   const userId = await getAuthUserId();
 
   // Load current snapshot
@@ -110,10 +140,12 @@ export async function processAbilityEvidence(
 
   // Compute deltas
   const evidence = computeEvidence(snapshot, cardType, isCorrect, difficulty);
-  if (evidence.length === 0) return [];
+  if (evidence.length === 0) return true;
 
-  // Insert ability_history rows
+  // Insert ability_history rows with a stable PK per (record, ability) so a
+  // retry never duplicates them.
   const rows = evidence.map((e) => ({
+    id: stableUuid(`${learningRecordId}::${e.abilityKey}`),
     user_id: userId,
     learning_record_id: learningRecordId,
     ability_key: e.abilityKey,
@@ -126,12 +158,13 @@ export async function processAbilityEvidence(
   }));
 
   const { error: histError } = await supabase.from('ability_history').insert(rows);
-  if (histError) {
+  if (histError && histError.code !== '23505') {
+    // 23505 = rows already exist from a prior attempt → idempotent, not an error.
     console.error('[DB] ability_history insert failed:', histError);
-    return evidence; // Still return evidence even if DB write fails
+    return false;
   }
 
-  // Update user_profile with new scores
+  // Update user_profile with new scores (absolute values → idempotent).
   const { error: profError } = await supabase
     .from('user_profile')
     .update({
@@ -147,9 +180,10 @@ export async function processAbilityEvidence(
 
   if (profError) {
     console.error('[DB] user_profile ability update failed:', profError);
+    return false;
   }
 
-  return evidence;
+  return true;
 }
 
 // ── Utility ──

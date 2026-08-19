@@ -38,12 +38,18 @@ export default function OnboardingFlow({ onComplete }: Props) {
   const handleDailyTime = async (v: DailyTime) => {
     setSubmitting(true);
     setError(null);
-    const ok = await onComplete({ examType: examType!, examBatch: examBatch!, dailyTime: v });
-    if (!ok) {
-      setSubmitting(false);
+    try {
+      const ok = await onComplete({ examType: examType!, examBatch: examBatch!, dailyTime: v });
+      if (!ok) {
+        setError('保存失败，请检查网络后重试。');
+      }
+      // On success, the parent switches stage and this component unmounts.
+    } catch {
+      // A rejection here must never leave the button permanently disabled.
       setError('保存失败，请检查网络后重试。');
+    } finally {
+      setSubmitting(false);
     }
-    // On success, the parent switches stage and this component unmounts.
   };
 
   return (

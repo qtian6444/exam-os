@@ -9,6 +9,15 @@
 // Supabase Auth session JWT (e.g. an anonymous sign-in user) may invoke this
 // function. Do NOT deploy with --no-verify-jwt: that would expose the paid
 // DeepSeek capability to anyone holding only the public anon key.
+//
+// Concurrency / cost guardrail: in-flight single-flight + a short success
+// cache. These are BEST-EFFORT and instance-local — they are a cost
+// optimization, NOT a cross-isolate idempotency guarantee. Two concurrent
+// identical requests that land on DIFFERENT isolates can still both reach
+// DeepSeek. We do not claim otherwise. Guaranteed cross-isolate idempotency
+// would require shared infrastructure (a table / Redis / Upstash), which is out
+// of scope; if the product ever needs it, the function must surface that as an
+// explicit CONFLICT_FOUND rather than silently de-duplicating.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
@@ -21,12 +30,13 @@ const MODEL = 'deepseek-v4-flash';
 const MAX_SENTENCE_LENGTH = 500;
 const MAX_CONTEXT_LENGTH = 2000;
 const UPSTREAM_TIMEOUT_MS = 15_000;
-const DEDUP_TTL_MS = 60_000;
-const DEDUP_MAX_ENTRIES = 500;
+const CACHE_TTL_MS = 60_000;
+const CACHE_MAX_ENTRIES = 500;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Expose-Headers': 'x-cache',
 };
 
 const RequestSchema = z.object({
@@ -149,17 +159,17 @@ ${context || '（无额外上下文）'}
 请严格按照系统要求，只输出 JSON。`;
 }
 
-function json(body: unknown, status: number): Response {
+function json(body: unknown, status: number, extraHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    headers: { 'Content-Type': 'application/json', ...corsHeaders, ...extraHeaders },
   });
 }
 
 // Extracts the auth.uid() ("sub" claim) from the session JWT in the
 // Authorization header. Signature verification is done by the Supabase
 // platform (verify_jwt=true); this is a cheap in-function read of the caller
-// identity for ownership/rate/dedup purposes, not a substitute for it.
+// identity for ownership/dedup purposes, not a substitute for it.
 function getCallerUserId(req: Request): string | null {
   const auth = req.headers.get('authorization') ?? '';
   if (!auth.startsWith('Bearer ')) return null;
@@ -174,11 +184,144 @@ function getCallerUserId(req: Request): string | null {
   }
 }
 
-// Best-effort in-memory dedup (single-isolate lifetime, not cross-instance).
-const dedup = new Map<string, { at: number; breakdown: unknown }>();
+// ── Upstream call with a full-lifecycle timeout ──
+//
+// The AbortController's timer spans fetch → body read → JSON parse → schema
+// validation, so a hung DeepSeek response (or a slow/oversized body) can never
+// hold the request open past UPSTREAM_TIMEOUT_MS.
+
+type UpstreamResult =
+  | { ok: true; breakdown: unknown }
+  | { ok: false; code: string; recoverable: boolean; status: number };
 
 function dedupKey(userId: string, sentence: string, context: string): string {
   return `${userId}::${sentence}::${context}`;
+}
+
+async function callDeepSeek(sentence: string, context: string): Promise<UpstreamResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+
+  try {
+    const resp = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: buildUserPrompt(sentence, context) },
+        ],
+        temperature: 0.3,
+        max_tokens: 1024,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!resp.ok) {
+      return { ok: false, code: 'DEEPSEEK_UPSTREAM_ERROR', recoverable: true, status: 502 };
+    }
+
+    const text = await resp.text();
+    if (controller.signal.aborted) {
+      return { ok: false, code: 'DEEPSEEK_TIMEOUT', recoverable: true, status: 504 };
+    }
+
+    let data: unknown;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      return { ok: false, code: 'NON_JSON_RESPONSE', recoverable: true, status: 502 };
+    }
+
+    const rawText = (data as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]
+      ?.message?.content;
+
+    if (!rawText || typeof rawText !== 'string') {
+      return { ok: false, code: 'EMPTY_RESPONSE', recoverable: true, status: 502 };
+    }
+
+    let jsonStr = rawText.trim();
+    if (jsonStr.startsWith('```')) {
+      jsonStr = jsonStr.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    }
+
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(jsonStr);
+    } catch {
+      return { ok: false, code: 'NON_JSON_RESPONSE', recoverable: true, status: 502 };
+    }
+
+    let breakdown: unknown;
+    try {
+      breakdown = BreakdownSchema.parse(parsedJson);
+    } catch {
+      return { ok: false, code: 'NON_JSON_RESPONSE', recoverable: true, status: 502 };
+    }
+
+    return { ok: true, breakdown };
+  } catch (err) {
+    if ((err as Error)?.name === 'AbortError') {
+      return { ok: false, code: 'DEEPSEEK_TIMEOUT', recoverable: true, status: 504 };
+    }
+    // Never include err.message in the response (may leak internals).
+    console.error('[breakdown] upstream error:', err);
+    return { ok: false, code: 'INTERNAL', recoverable: true, status: 500 };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ── Instance-local in-flight single-flight + success cache ──
+//
+// BEST-EFFORT, instance-local. Not a cross-isolate boundary: two requests for
+// the same (user, sentence, context) that land on different isolates can still
+// both reach DeepSeek. This is a cost optimization only.
+
+const inFlight = new Map<string, Promise<UpstreamResult>>();
+const cache = new Map<string, { at: number; result: UpstreamResult }>();
+
+type CacheSource = 'fresh' | 'in-flight' | 'cache';
+
+async function getBreakdownOnce(
+  userId: string,
+  sentence: string,
+  context: string,
+): Promise<{ result: UpstreamResult; source: CacheSource }> {
+  const key = dedupKey(userId, sentence, context);
+
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+    return { result: cached.result, source: 'cache' };
+  }
+  if (cached) cache.delete(key); // stale entry
+
+  const existing = inFlight.get(key);
+  if (existing) {
+    return { result: await existing, source: 'in-flight' };
+  }
+
+  const promise = callDeepSeek(sentence, context).then((result) => {
+    if (result.ok) {
+      if (cache.size >= CACHE_MAX_ENTRIES) {
+        const oldestKey = cache.keys().next().value;
+        if (oldestKey !== undefined) cache.delete(oldestKey);
+      }
+      cache.set(key, { at: Date.now(), result });
+    }
+    return result;
+  });
+
+  inFlight.set(key, promise);
+  try {
+    return { result: await promise, source: 'fresh' };
+  } finally {
+    inFlight.delete(key);
+  }
 }
 
 serve(async (req: Request) => {
@@ -216,87 +359,15 @@ serve(async (req: Request) => {
 
   const { sentence, context } = parsed.data;
 
-  // Dedup: return the cached result for an obvious repeat within the TTL.
-  const key = dedupKey(userId, sentence, context);
-  const hit = dedup.get(key);
-  if (hit && Date.now() - hit.at < DEDUP_TTL_MS) {
-    return json({ ok: true, breakdown: hit.breakdown }, 200);
+  const { result, source } = await getBreakdownOnce(userId, sentence, context);
+
+  if (!result.ok) {
+    return json(
+      { ok: false, error: { code: result.code, recoverable: result.recoverable } },
+      result.status,
+      { 'X-Cache': source },
+    );
   }
 
-  // Upstream call with an explicit timeout — a hung DeepSeek response must not
-  // hold the request open indefinitely.
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
-
-  let resp: Response;
-  try {
-    resp = await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: buildUserPrompt(sentence, context) },
-        ],
-        temperature: 0.3,
-        max_tokens: 1024,
-      }),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    clearTimeout(timer);
-    if ((err as Error)?.name === 'AbortError') {
-      return json({ ok: false, error: { code: 'DEEPSEEK_TIMEOUT', recoverable: true } }, 504);
-    }
-    // Never include err.message in the response (may leak internals).
-    console.error('[breakdown] upstream network error:', err);
-    return json({ ok: false, error: { code: 'INTERNAL', recoverable: true } }, 500);
-  }
-  clearTimeout(timer);
-
-  if (!resp.ok) {
-    // Stable, safe error code — never echo upstream body / headers.
-    return json({ ok: false, error: { code: 'DEEPSEEK_UPSTREAM_ERROR', recoverable: true } }, 502);
-  }
-
-  let data: unknown;
-  try {
-    data = await resp.json();
-  } catch {
-    return json({ ok: false, error: { code: 'EMPTY_RESPONSE', recoverable: true } }, 502);
-  }
-
-  const rawText = (data as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0]
-    ?.message?.content;
-
-  if (!rawText || typeof rawText !== 'string') {
-    return json({ ok: false, error: { code: 'EMPTY_RESPONSE', recoverable: true } }, 502);
-  }
-
-  let jsonStr = rawText.trim();
-  if (jsonStr.startsWith('```')) {
-    jsonStr = jsonStr.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  }
-
-  let parsedJson: unknown;
-  try {
-    parsedJson = JSON.parse(jsonStr);
-  } catch {
-    return json({ ok: false, error: { code: 'NON_JSON_RESPONSE', recoverable: true } }, 502);
-  }
-
-  const breakdown = BreakdownSchema.parse(parsedJson);
-
-  // Cache successful result for dedup; keep the map bounded.
-  if (dedup.size >= DEDUP_MAX_ENTRIES) {
-    const oldestKey = dedup.keys().next().value;
-    if (oldestKey !== undefined) dedup.delete(oldestKey);
-  }
-  dedup.set(key, { at: Date.now(), breakdown });
-
-  return json({ ok: true, breakdown }, 200);
+  return json({ ok: true, breakdown: result.breakdown }, 200, { 'X-Cache': source });
 });
