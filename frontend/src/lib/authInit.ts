@@ -22,7 +22,11 @@ export interface AuthErrorLike {
 }
 
 export interface AuthApi {
-  getSession(): Promise<{ session: AuthSessionLike | null }>;
+  // Returns BOTH the cached session and any read error. A transient read
+  // failure (e.g. a refresh that failed on the network) must be distinguishable
+  // from "genuinely no session" so the caller never manufactures a fresh
+  // identity in response to a network blip.
+  getSession(): Promise<{ session: AuthSessionLike | null; error: AuthErrorLike | null }>;
   getUser(): Promise<{
     data: { user: { id: string } | null } | null;
     error: AuthErrorLike | null;
@@ -38,32 +42,45 @@ export interface AuthApi {
 export type SessionVerdict = 'valid' | 'invalid' | 'transient';
 
 /**
- * Classify a `getUser()` outcome.
+ * Classify a `getUser()` (or `getSession()`) outcome.
  *
  * The one property that must NOT be violated: a *transient* failure (network /
- * 5xx / anything we cannot be sure about) must NEVER be treated as "token is
- * invalid" — doing so silently signOut + creates a new anonymous identity, i.e.
- * silent UID drift.
+ * 429 / 5xx / anything we cannot be sure about) must NEVER be treated as "token
+ * is invalid" — doing so silently signOut + creates a new anonymous identity,
+ * i.e. silent UID drift.
  *
- * Only an explicit, definite rejection (no session, AuthSessionMissingError, or
- * a 401/403 auth response) may count as `invalid`.
+ * Only an explicit, definite rejection may count as `invalid`:
+ *   - no session at all (user null + no error)
+ *   - AuthSessionMissingError (no session)
+ *   - AuthInvalidCredentialsError (credentials definitely rejected)
+ *   - an HTTP 401/403 auth response
+ *
+ * Everything else — including a rate-limit 429, a 5xx, an unclassified 4xx, or
+ * an unknown shape — is treated as `transient`, so the caller keeps the current
+ * identity and surfaces a retryable error instead of rotating the UID.
  */
-export function classifySession(data: { user: { id: string } | null } | null, error: AuthErrorLike | null): SessionVerdict {
+export function classifySession(
+  data: { user: { id: string } | null } | null,
+  error: AuthErrorLike | null,
+): SessionVerdict {
   if (data?.user) return 'valid';
 
   if (!error) return 'invalid'; // user null with no error → no usable session
 
+  // Definite invalidation signals (Supabase Auth error semantics).
   if (error.name === 'AuthSessionMissingError') return 'invalid';
+  if (error.name === 'AuthInvalidCredentialsError') return 'invalid';
   if (error.name === 'AuthRetryableFetchError') return 'transient';
 
   const status = error.status;
   if (typeof status === 'number') {
     if (status === 401 || status === 403) return 'invalid';
+    if (status === 429) return 'transient'; // rate limit — not a token problem
     if (status >= 500) return 'transient';
-    return 'invalid';
   }
 
-  // Unknown shape → be conservative: keep identity, surface as retryable.
+  // Unclassified 4xx / unknown shape → be conservative: keep identity, surface
+  // as retryable. Never infer invalidation from an ambiguous status.
   return 'transient';
 }
 
@@ -80,6 +97,11 @@ export interface AuthInitializer {
  *  - generation ownership: once a newer attempt starts (via `reset()` + a fresh
  *    `ensure()`), any still-in-flight older attempt is discarded and, if it was
  *    in the middle of writing a session, the authoritative one is re-asserted.
+ *  - destructive-side-effect ownership: the initializer performs NO destructive
+ *    signOut. A stale attempt therefore can never clear a newer identity — the
+ *    only way a stale attempt mutates local state is via signInAnonymously(),
+ *    and after it is recognized as stale, `discardStale()` re-asserts the latest
+ *    authoritative session (a write in the correct direction).
  */
 export function createAuthInitializer(api: AuthApi): AuthInitializer {
   let attemptSeq = 0;
@@ -90,49 +112,23 @@ export function createAuthInitializer(api: AuthApi): AuthInitializer {
 
   async function discardStale(): Promise<void> {
     // A superseded attempt may already have written its own session via
-    // signInAnonymously(). Re-assert the latest authoritative session, or clear
-    // local state if we have none yet.
+    // signInAnonymously(), overwriting the newer one. Re-assert the latest
+    // authoritative session. If there is none yet, do NOTHING — the newer
+    // attempt's own sign-in will overwrite whatever the stale attempt wrote.
+    //
+    // Deliberately NO signOut here: a destructive clear could race a newer
+    // identity that is established concurrently, and is the exact bug this
+    // module exists to prevent (destructive auth side-effect ownership).
     if (authoritativeSession) {
       try {
         await api.setSession(authoritativeSession);
       } catch {
         /* best-effort */
       }
-    } else {
-      try {
-        await api.signOut({ scope: 'local' });
-      } catch {
-        /* best-effort */
-      }
     }
   }
 
-  async function doEnsure(seq: number): Promise<string> {
-    const { session } = await api.getSession();
-    if (isStale(seq)) throw new Error('Auth attempt superseded');
-
-    if (session) {
-      const { data, error } = await api.getUser();
-      if (isStale(seq)) throw new Error('Auth attempt superseded');
-
-      const verdict = classifySession(data, error);
-      if (verdict === 'valid') {
-        authoritativeSession = {
-          access_token: session.access_token,
-          refresh_token: session.refresh_token,
-        };
-        return session.user.id;
-      }
-      if (verdict === 'invalid') {
-        // Definite invalidation only: clear and fall through to fresh sign-in.
-        await api.signOut({ scope: 'local' });
-        if (isStale(seq)) throw new Error('Auth attempt superseded');
-      } else {
-        // Transient: keep identity, surface a retryable error. Do NOT signOut.
-        throw new Error('Unable to verify session (network). Please retry.');
-      }
-    }
-
+  async function signIn(seq: number): Promise<string> {
     const { data, error } = await api.signInAnonymously();
     if (isStale(seq)) {
       await discardStale();
@@ -146,6 +142,48 @@ export function createAuthInitializer(api: AuthApi): AuthInitializer {
       refresh_token: data.session.refresh_token,
     };
     return data.user.id;
+  }
+
+  async function doEnsure(seq: number): Promise<string> {
+    const { session, error: sessionError } = await api.getSession();
+    if (isStale(seq)) throw new Error('Auth attempt superseded');
+
+    if (!session) {
+      // No cached session. If getSession itself failed transiently (a refresh /
+      // network failure with no session in hand), surface a retryable error and
+      // KEEP identity — never fall through to a fresh sign-in on a transient
+      // read failure. A definite invalidation is the only path that proceeds.
+      if (sessionError) {
+        const verdict = classifySession(null, sessionError);
+        if (verdict === 'transient') {
+          throw new Error('Unable to read session (network). Please retry.');
+        }
+        // definite invalid → fall through to a fresh sign-in below
+      }
+      return signIn(seq);
+    }
+
+    const { data, error } = await api.getUser();
+    if (isStale(seq)) throw new Error('Auth attempt superseded');
+
+    const verdict = classifySession(data, error);
+    if (verdict === 'valid') {
+      authoritativeSession = {
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+      };
+      return session.user.id;
+    }
+    if (verdict === 'transient') {
+      // Transient: keep identity, surface a retryable error. Do NOT signOut.
+      throw new Error('Unable to verify session (network). Please retry.');
+    }
+
+    // Definite invalidation: fall through to a fresh anonymous sign-in. There is
+    // deliberately NO signOut before it — signInAnonymously() overwrites the
+    // stale local session, and a destructive clear here could race a newer
+    // attempt's identity (destructive auth side-effect ownership).
+    return signIn(seq);
   }
 
   function ensure(): Promise<string> {

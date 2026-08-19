@@ -21,6 +21,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
+import { dedupKey } from './dedup.ts';
 
 const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
 const API_URL = 'https://api.deepseek.com/v1/chat/completions';
@@ -193,10 +194,6 @@ function getCallerUserId(req: Request): string | null {
 type UpstreamResult =
   | { ok: true; breakdown: unknown }
   | { ok: false; code: string; recoverable: boolean; status: number };
-
-function dedupKey(userId: string, sentence: string, context: string): string {
-  return `${userId}::${sentence}::${context}`;
-}
 
 async function callDeepSeek(sentence: string, context: string): Promise<UpstreamResult> {
   const controller = new AbortController();

@@ -15,7 +15,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // Wire the real Supabase auth client into the testable initializer.
 const initializer = createAuthInitializer({
   async getSession() {
-    const { data } = await supabase.auth.getSession();
+    const { data, error } = await supabase.auth.getSession();
     const s = data.session;
     return {
       session: s
@@ -24,6 +24,12 @@ const initializer = createAuthInitializer({
             access_token: s.access_token,
             refresh_token: s.refresh_token ?? '',
           }
+        : null,
+      // Preserve the read error (if any) so the initializer can distinguish a
+      // transient refresh/network failure from a genuinely absent session — and
+      // never rotates the anonymous identity on a network blip.
+      error: error
+        ? { name: error.name, status: (error as { status?: number }).status, message: error.message }
         : null,
     };
   },

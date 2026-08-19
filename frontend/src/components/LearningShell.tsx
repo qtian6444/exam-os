@@ -2,12 +2,8 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import type { LearningCard, CardType } from '../types';
 import { getNextCard, getTotalCards } from '../data/mock';
-import {
-  insertLearningRecord,
-  processAbilityEvidence,
-  shouldSkipEvidence,
-  getCardDifficulty,
-} from '../lib/db';
+import { applyLearningEvidence } from '../lib/db';
+import { executeSave } from '../lib/saveExecutor';
 import ChoiceCard from './cards/ChoiceCard';
 import ReadingBreakdownCard from './cards/ReadingBreakdownCard';
 import ReorderCard from './cards/ReorderCard';
@@ -52,32 +48,18 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
     advance();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Persist a card result + ability evidence. Returns true only if every
-  // critical write succeeded — otherwise progression must be blocked, never
-  // silently treated as saved.
+  // Persist a card result + ability evidence in ONE atomic RPC call. Returns
+  // true only if the RPC reports a definitive APPLIED status — otherwise
+  // progression must be blocked, never silently treated as saved.
   const persist = useCallback(
     async (payload: PersistPayload): Promise<boolean> => {
-      const recordId = await insertLearningRecord({
+      return applyLearningEvidence({
         sessionId,
         cardId: payload.cardId,
         cardType: payload.cardType,
         correct: payload.correct,
         userAnswer: payload.userAnswer,
       });
-
-      if (!recordId) return false;
-
-      if (!shouldSkipEvidence(payload.cardType, payload.cardId) && payload.correct !== null) {
-        const ok = await processAbilityEvidence(
-          recordId,
-          payload.cardType,
-          payload.correct,
-          getCardDifficulty(payload.cardType),
-        );
-        if (!ok) return false;
-      }
-
-      return true;
     },
     [sessionId],
   );
@@ -89,19 +71,25 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
       pendingRef.current = { payload, advanceFn };
       setSaving(true);
 
-      const ok = await persist(payload);
-
-      if (ok) {
-        pendingRef.current = null;
-        savingRef.current = false;
-        setSaving(false);
-        setSaveError(false);
-        advanceFn();
-      } else {
-        savingRef.current = false;
-        setSaving(false);
-        setSaveError(true);
-      }
+      // executeSave guarantees the failure handler runs on BOTH a `false` return
+      // and a thrown exception, so savingRef can never be left stuck true.
+      await executeSave(
+        () => persist(payload),
+        {
+          onSuccess: () => {
+            pendingRef.current = null;
+            savingRef.current = false;
+            setSaving(false);
+            setSaveError(false);
+            advanceFn();
+          },
+          onFailure: () => {
+            savingRef.current = false;
+            setSaving(false);
+            setSaveError(true);
+          },
+        },
+      );
     },
     [persist],
   );

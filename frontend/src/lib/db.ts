@@ -2,31 +2,45 @@ import { supabase, getAuthUserId } from './supabase';
 import type { ExamType, ExamBatch, DailyTime } from '../types';
 import {
   type AbilitySnapshot,
-  computeEvidence,
   blankSnapshot,
 } from './ability';
 
 // ── Idempotency key helper ──
 
-// Deterministic RFC-4122-shaped UUID from a string seed. Used to give
-// learning_record / ability_history inserts a stable PK across retries, so a
-// re-attempt after a partially-acknowledged write can never manufacture a
-// duplicate row — without adding a new unique constraint to any core table.
-function fnv1a(str: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  return h >>> 0;
+// Deterministic RFC-4122-shaped UUID from a string seed, derived from SHA-256
+// (NOT a 32-bit FNV). It gives learning_record / ability_history inserts a
+// stable PK across retries, so a re-attempt after a partially-acknowledged write
+// can never manufacture a duplicate row. SHA-256 is used because a 32-bit
+// deterministic space is collidable; a 128-bit cryptographically-strong digest
+// makes two *different* logical operations mapping to the same key vanishingly
+// unlikely (≈2^-128).
+export async function stableUuid(seed: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(seed));
+  const bytes = new Uint8Array(digest).slice(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50; // RFC-4122 version 5
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC-4122 variant 10xx
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
-function stableUuid(seed: string): string {
-  const a = fnv1a(seed + '#a').toString(16).padStart(8, '0');
-  const b = fnv1a(seed + '#b').toString(16).padStart(8, '0');
-  const c = fnv1a(seed + '#c').toString(16).padStart(8, '0');
-  const d = fnv1a(seed + '#d').toString(16).padStart(8, '0');
-  return `${a}-${b.slice(0, 4)}-${b.slice(4)}-${c.slice(0, 4)}-${c.slice(4)}${d}`;
+/**
+ * Pure decision: does an already-persisted learning_record row represent the
+ * SAME logical operation as the one we are trying to write?
+ *
+ * A 23505 (PK exists) is only idempotent success if the conflicting row is the
+ * same (user, session, card). If the PK collided with a *different* operation,
+ * this returns false and the caller must hard-fail rather than swallow it.
+ */
+export function isSameLearningOperation(
+  existing: { user_id: string; session_id: string; card_id: string } | null,
+  expected: { userId: string; sessionId: string; cardId: string },
+): boolean {
+  return (
+    !!existing &&
+    existing.user_id === expected.userId &&
+    existing.session_id === expected.sessionId &&
+    existing.card_id === expected.cardId
+  );
 }
 
 // ── User Profile ──
@@ -56,20 +70,37 @@ export async function upsertUserProfile(profile: {
   return userId;
 }
 
-export async function getAbilitySnapshot(): Promise<AbilitySnapshot> {
-  const userId = await getAuthUserId();
-  const { data, error } = await supabase
-    .from('user_profile')
-    .select(
-      'ability_vocabulary, ability_sentence, ability_reading, ability_listening, ability_writing, confidence_vocabulary, confidence_sentence, confidence_reading, confidence_listening, confidence_writing',
-    )
-    .eq('user_id', userId)
-    .maybeSingle();
+export interface ProfileAbilityRow {
+  ability_vocabulary: number | null;
+  ability_sentence: number | null;
+  ability_reading: number | null;
+  ability_listening: number | null;
+  ability_writing: number | null;
+  confidence_vocabulary: number | null;
+  confidence_sentence: number | null;
+  confidence_reading: number | null;
+  confidence_listening: number | null;
+  confidence_writing: number | null;
+}
 
-  if (error || !data) {
+/**
+ * Pure decision: turn a profile read into a snapshot.
+ *
+ * A READ error (network / 5xx / RLS denial) is NOT "no ability data yet" — it
+ * throws so the caller surfaces a retryable failure instead of silently treating
+ * a broken read as a blank (all-zero) snapshot. Only `data === null` with no
+ * error (genuinely no profile row) maps to a blank starting snapshot.
+ */
+export function resolveAbilitySnapshot(
+  data: ProfileAbilityRow | null,
+  error: { message: string } | null,
+): AbilitySnapshot {
+  if (error) {
+    throw new Error(`Failed to read ability snapshot: ${error.message}`);
+  }
+  if (!data) {
     return blankSnapshot();
   }
-
   return {
     vocabulary: data.ability_vocabulary ?? 0,
     sentence: data.ability_sentence ?? 0,
@@ -84,102 +115,82 @@ export async function getAbilitySnapshot(): Promise<AbilitySnapshot> {
   };
 }
 
-// ── Learning Record ──
+export async function getAbilitySnapshot(): Promise<AbilitySnapshot> {
+  const userId = await getAuthUserId();
+  const { data, error } = await supabase
+    .from('user_profile')
+    .select(
+      'ability_vocabulary, ability_sentence, ability_reading, ability_listening, ability_writing, confidence_vocabulary, confidence_sentence, confidence_reading, confidence_listening, confidence_writing',
+    )
+    .eq('user_id', userId)
+    .maybeSingle();
 
-export interface RecordCardParams {
+  return resolveAbilitySnapshot(data, error);
+}
+
+/**
+ * Pure decision: did a profile UPDATE actually affect a row? A `.select()`
+ * returning zero rows (no matching user_profile) is a failure, not a silent
+ * "success".
+ */
+export function isProfileUpdateApplied(rows: { user_id: string }[] | null): boolean {
+  return !!rows && rows.length > 0;
+}
+
+// ── Learning Record + Ability Evidence (atomic RPC) ──
+//
+// P0-SECURITY-R4: the whole write chain (learning_record + ability_history +
+// user_profile ability/state update) is delegated to the PostgreSQL function
+// `apply_learning_evidence`, which runs it inside ONE transaction. This removes
+// the old client-side multi-step write (insertLearningRecord →
+// processAbilityEvidence) that could leave learning_record committed while the
+// ability/profile update was lost, and could double-apply evidence on a retry
+// after a lost response.
+//
+// The RPC is idempotent on the deterministic operation id (the same
+// SHA-256-based UUID as before) and returns a machine-readable status. The
+// client only validates that status — it never re-inserts, re-updates, or
+// re-applies the individual steps itself.
+
+export type ApplyEvidenceStatus = 'APPLIED_NEW' | 'IDEMPOTENT_ALREADY_APPLIED';
+
+export async function applyLearningEvidence(params: {
   sessionId: string;
   cardId: string;
   cardType: 'choice' | 'reading_breakdown' | 'reorder';
   correct: boolean | null;
   userAnswer?: unknown;
-}
+}): Promise<boolean> {
+  // Stable operation id so a retry of the same (session, card) hits the same
+  // learning_record PK and the RPC returns idempotent success instead of a
+  // duplicate. The RPC derives the owner from auth.uid() — there is no user_id
+  // parameter, so no client-supplied identity can be forged.
+  const operationId = await stableUuid(`${params.sessionId}::${params.cardId}`);
 
-export async function insertLearningRecord(params: RecordCardParams): Promise<string | null> {
-  const userId = await getAuthUserId();
-
-  // Stable PK so a retry of the same (session, card) reuses the same row rather
-  // than inserting a duplicate.
-  const id = stableUuid(`${params.sessionId}::${params.cardId}`);
-
-  const { data, error } = await supabase
-    .from('learning_record')
-    .insert({
-      id,
-      user_id: userId,
-      session_id: params.sessionId,
-      card_id: params.cardId,
-      card_type: params.cardType,
-      correct: params.correct,
-      user_answer: params.userAnswer || null,
-    })
-    .select('id')
-    .single();
+  const { data, error } = await supabase.rpc('apply_learning_evidence', {
+    p_operation_id: operationId,
+    p_session_id: params.sessionId,
+    p_card_id: params.cardId,
+    p_card_type: params.cardType,
+    p_correct: params.correct,
+    p_user_answer: params.userAnswer ?? null,
+    p_skip_evidence: shouldSkipEvidence(params.cardType, params.cardId),
+    p_difficulty: getCardDifficulty(params.cardType),
+  });
 
   if (error) {
-    // 23505 = PK already exists from a prior (partially-acknowledged) attempt.
-    // Idempotent success, not a new row.
-    if (error.code === '23505') return id;
-    console.error('[DB] insertLearningRecord failed:', error);
-    return null;
-  }
-  return data.id;
-}
-
-// ── Ability History ──
-
-export async function processAbilityEvidence(
-  learningRecordId: string,
-  cardType: string,
-  isCorrect: boolean,
-  difficulty: number,
-): Promise<boolean> {
-  const userId = await getAuthUserId();
-
-  // Load current snapshot
-  const snapshot = await getAbilitySnapshot();
-
-  // Compute deltas
-  const evidence = computeEvidence(snapshot, cardType, isCorrect, difficulty);
-  if (evidence.length === 0) return true;
-
-  // Insert ability_history rows with a stable PK per (record, ability) so a
-  // retry never duplicates them.
-  const rows = evidence.map((e) => ({
-    id: stableUuid(`${learningRecordId}::${e.abilityKey}`),
-    user_id: userId,
-    learning_record_id: learningRecordId,
-    ability_key: e.abilityKey,
-    evidence_weight: e.evidenceWeight,
-    correct: e.correct,
-    score_before: e.scoreBefore,
-    score_after: e.scoreAfter,
-    confidence_before: e.confidenceBefore,
-    confidence_after: e.confidenceAfter,
-  }));
-
-  const { error: histError } = await supabase.from('ability_history').insert(rows);
-  if (histError && histError.code !== '23505') {
-    // 23505 = rows already exist from a prior attempt → idempotent, not an error.
-    console.error('[DB] ability_history insert failed:', histError);
+    // The RPC raised one of the stable error codes (AUTH_REQUIRED,
+    // INVALID_PAYLOAD, PROFILE_NOT_FOUND, LEARNING_OPERATION_ID_COLLISION,
+    // ATOMIC_STATE_CONFLICT, PROFILE_UPDATE_FAILED). The transaction rolled
+    // back, so nothing was partially written. Surface as failure — never a
+    // silent "success".
+    console.error('[DB] applyLearningEvidence RPC failed:', error);
     return false;
   }
 
-  // Update user_profile with new scores (absolute values → idempotent).
-  const { error: profError } = await supabase
-    .from('user_profile')
-    .update({
-      ability_vocabulary: snapshot.vocabulary,
-      ability_sentence: snapshot.sentence,
-      ability_reading: snapshot.reading,
-      confidence_vocabulary: snapshot.confidence_vocabulary,
-      confidence_sentence: snapshot.confidence_sentence,
-      confidence_reading: snapshot.confidence_reading,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('user_id', userId);
-
-  if (profError) {
-    console.error('[DB] user_profile ability update failed:', profError);
+  const status = (data as { status?: string } | null)?.status;
+  if (status !== 'APPLIED_NEW' && status !== 'IDEMPOTENT_ALREADY_APPLIED') {
+    console.error('[DB] applyLearningEvidence unexpected status:', data);
     return false;
   }
 

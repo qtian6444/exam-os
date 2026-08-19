@@ -6,16 +6,16 @@
 ## Identity
 
 - Stage ID：P0-SECURITY-01
-- Review cycle：R3（R2 被 Engineering QA FAIL；R3 修复 R2 的 5 个 Blocking，进入 R3 重新完整审）
+- Review cycle：R4（R3 被 Engineering QA 判定存在 ENG-R3-004 原子学习写入阻断；R4 以 Postgres RPC 修复，进入 R4 重新完整审）
 - Agent Constitution version / commit：Governance V1（commit b75c634）
 - Exam OS Constitution version / commit：Governance V1（commit b75c634）
 - Stage Contract：P0-SECURITY-01「安全边界加固」（见 docs/stages/CURRENT_STAGE.md）
 - Stage Contract version / commit：P0-SECURITY-01（随 Stage 一并提交）
-- Base commit：5dde1628545b5ca9ad9728485d9b44cc3c38f583
+- Base commit：bd0528a2a266b555f51279cdd3c495922220ac2b
 - Review target / HEAD commit：PROVIDED_EXTERNALLY_AFTER_COMMIT
 - Branch：master
 - Implementation Agent：DeepSeek（Deepseek-v4-pro）
-- Handoff time：2026-08-18
+- Handoff time：2026-08-19
 
 ## Scope
 
@@ -36,6 +36,8 @@
     3. ENG-R2-003 Onboarding `onComplete` 拒绝补 try/catch/finally；`startLearning` 内部 catch，保证按钮永不永久禁用。
     4. ENG-R2-004 关键写入真实阻塞：LearningShell 改为 await 写入结果，失败阻断推进/不增进度、显示非技术错误 + 重试；`insertLearningRecord`/`processAbilityEvidence` 用确定性 PK + 23505 实现幂等，重试不产生重复行。
     5. ENG-R2-005 breakdown 生命周期加固：服务端 in-flight single-flight + 全生命周期超时（fetch→body→parse→validate）+ `X-Cache` 观测头；客户端 raw fetch + AbortController（超时/卸载 abort）+ 仅可恢复错误的有界重试。幂等边界：IMPLEMENTED=instance-local in-flight single-flight；NOT_CLAIMED=cross-isolate/global exactly-once dedup；CONFLICT_FOUND=跨 isolate 去重需当前授权架构/范围之外的共享基础设施，故不新增 Redis/KV/新核心表/新基础设施。
+  - R4 修复（针对 R3 Engineering QA 的阻断：ENG-R3-004）：
+    1. ENG-R3-004 原子学习写入：将客户端多步写入（insertLearningRecord → processAbilityEvidence → user_profile update）替换为单个 PostgreSQL RPC `apply_learning_evidence`（migration 004），在**单事务**内完成 learning_record + ability_history + user_profile 能力/状态更新，达成 exactly-once：重试安全 / 丢失响应安全 / 并发安全。要点：确定性 SHA-256→UUIDv5 operation id 作幂等键；`SELECT ... FOR UPDATE` 串行化 per-user profile 读改写；learning_record `ON CONFLICT (id) DO NOTHING` + 同身份校验；ability_history 新增 `UNIQUE(learning_record_id, ability_key)` + `ON CONFLICT DO NOTHING`（异常重复则 `ATOMIC_STATE_CONFLICT` 硬失败）；SECURITY INVOKER + `auth.uid()` 身份（无 user_id 入参、无 service_role、无 SECURITY DEFINER、无新核心表）。
 
 - 明确不包含内容：
   - 不包含 DeepSeek Key 自动轮换（轮换由 Product Owner 在 DeepSeek 控制台手工执行）。
@@ -64,6 +66,14 @@
   - supabase/migrations/002_security_hardening.sql
   - supabase/migrations/003_ability_history_reference_check.sql
   - frontend/src/lib/authInit.ts
+  - frontend/src/lib/saveExecutor.ts（R4）
+  - frontend/src/lib/authInit.test.ts（R4）
+  - frontend/src/lib/db.test.ts（R4）
+  - frontend/src/lib/deepseek.test.ts（R4）
+  - frontend/src/lib/saveExecutor.test.ts（R4）
+  - supabase/functions/breakdown/dedup.ts（R4）
+  - supabase/functions/breakdown/dedup_test.ts（R4）
+  - supabase/migrations/004_atomic_learning_evidence.sql（R4）
 - 删除文件：无
 
 ## Data and Interfaces
@@ -71,8 +81,10 @@
 - 数据库 / migration：
   - 002_security_hardening.sql：DROP 旧 permissive policy → CREATE owner-only policy。
   - 003_ability_history_reference_check.sql：ability_history INSERT 增加被引用 learning_record 的同用户归属校验。
+  - 004_atomic_learning_evidence.sql（R4）：新增 RPC `apply_learning_evidence`（SECURITY INVOKER，单事务原子写入 learning_record + ability_history + user_profile）；ability_history 增加 `UNIQUE(learning_record_id, ability_key)`；`SELECT ... FOR UPDATE` 串行化；幂等键 = 确定性 operation id（UUIDv5）。
 - API / Edge Function：supabase/functions/breakdown（POST，JWT 验证开启；入参 `{sentence, context}`，出参 `{ok:true, breakdown}` 或 `{ok:false, error:{code, recoverable}}`；错误码含 UNAUTHENTICATED / MISSING_SECRET / INVALID_PAYLOAD / DEEPSEEK_TIMEOUT / DEEPSEEK_UPSTREAM_ERROR / EMPTY_RESPONSE / NON_JSON_RESPONSE / INTERNAL）
-- 状态机：无 schema/状态机变更（沿用既有 5 表，`user_id TEXT`，无 FK 到 auth.users）
+- RPC（R4）：`apply_learning_evidence(p_operation_id uuid, p_session_id text, p_card_id text, p_card_type text, p_correct boolean, p_user_answer jsonb, p_skip_evidence boolean, p_difficulty real) → jsonb`，SECURITY INVOKER；错误码 AUTH_REQUIRED / INVALID_PAYLOAD / PROFILE_NOT_FOUND / LEARNING_OPERATION_ID_COLLISION / ATOMIC_STATE_CONFLICT / PROFILE_UPDATE_FAILED；返回 `{status: 'APPLIED_NEW'|'IDEMPOTENT_ALREADY_APPLIED', learning_record_id, evidence_applied}`
+- 状态机：沿用既有 5 表（无第 6 表）；R4 仅对 ability_history 增加 UNIQUE 约束，无新表、无 FK 到 auth.users
 - RLS / 权限：
   - user_profile：SELECT/INSERT/UPDATE owner-only
   - learning_record：SELECT/INSERT owner-only
@@ -107,6 +119,11 @@
 - tests：R3 auth 逻辑断言脚本 `_r3_authlogic.test.mjs` 19/19 PASS（single-flight、StrictMode 双挂载、代际所有权 late-resolution、transient-vs-invalid、classifySession 单测）
 - migration verification：PASS（002、003 均已在线上 SQL Editor 执行，Success）
 - 其他：bundle 密钥泄漏扫描 PASS（0 命中）；R3 线上断言脚本 `_r3_live.test.mjs` 14/14 PASS（RLS 双用户隔离、ability_history 跨用户引用 BLOCKED、内容只读、未认证拦截、db 幂等 23505 + 恰好 1 行、JWT 未认证 401 / 认证 200、无 mock fallback、超限 400）
+- R4 vitest：47/47 PASS（4 文件：authInit / db / deepseek / saveExecutor；db.test.ts 新增 applyLearningEvidence 原子 RPC 契约断言）
+- R4 migration deployment（004）：BLOCKED（本 Agent 无 supabase CLI / psql，未部署；需 Product Owner 在 Supabase SQL Editor 执行 `004_atomic_learning_evidence.sql`）
+- R4 DB integration test：NOT_RUN（本 Agent 无 PostgreSQL 连接；apply_learning_evidence 的 exactly-once 行为以 SQL 单事务 + 单测断言为准，未做线上集成验证）
+- R4 Deno test（`dedup_test.ts`）：NOT_RUN（本 Agent 无 deno）
+- R4 bundle 密钥扫描：PASS（0 命中 `sk-` / `api.deepseek.com`）
 
 ### Manual
 
@@ -143,7 +160,7 @@
 
 ## Review Boundary
 
-- Review range：`5dde1628545b5ca9ad9728485d9b44cc3c38f583..<HEAD>`
+- Review range：`bd0528a2a266b555f51279cdd3c495922220ac2b..<HEAD>`
 - 允许检查受本 Stage 影响的旧调用链：YES
 - 审查期间 HEAD 允许变化：NO
 
@@ -155,7 +172,7 @@
 
 - Reviewer：（待 Codex 双审分配）
 - Reviewed commit：（待定）
-- Review cycle：R1 已 FAIL（4 Blocking + 2 Non-blocking）；R2 已 FAIL（5 Blocking：ENG-R2-001..005）；R3 待审
+- Review cycle：R1 已 FAIL（4 Blocking + 2 Non-blocking）；R2 已 FAIL（5 Blocking：ENG-R2-001..005）；R3 已 FAIL（ENG-R3-004 原子学习写入）；R4 待审
 - Verdict：PENDING / PASS / FAIL
 - Blocking：
 - Non-blocking：
@@ -165,7 +182,7 @@
 
 - Reviewer：（待定）
 - Reviewed commit：（待定）
-- Review cycle：R1 已 FAIL（1 Blocking）；R3 待审
+- Review cycle：R1 已 FAIL（1 Blocking）；R3 待审；R4 待审
 - Verdict：PENDING / PASS / FAIL
 - Blocking：
 - Non-blocking：
@@ -191,8 +208,8 @@ STAGE_ACCEPTED
 
 ## Final Status
 
-- Current status：IMPLEMENTATION_COMPLETE（R3，待 commit / push / freeze HEAD）
+- Current status：IMPLEMENTATION_COMPLETE（R4，待 commit / push / freeze HEAD）
 - Accepted HEAD：
 - Product Owner：
 - Approval date：
-- Notes：本 Agent 不声明 STAGE_ACCEPTED / PRODUCT_PASS / ENGINEERING_PASS；以上三项待 Codex R3 双审。breakdown 并发 single-flight 与全生命周期超时已实现，但线上验证需 Product Owner 在 Supabase Dashboard 重新部署 `breakdown` 函数后方可执行（本 Agent 无 supabase CLI）。
+- Notes：本 Agent 不声明 STAGE_ACCEPTED / PRODUCT_PASS / ENGINEERING_PASS；以上三项待 Codex R4 双审。R4 原子 RPC `apply_learning_evidence`（migration 004）已实现并单测通过，但线上部署与 DB 集成验证需 Product Owner 在 Supabase SQL Editor 执行 `004_atomic_learning_evidence.sql` 后方可进行（本 Agent 无 supabase CLI / psql / deno）。breakdown 并发 single-flight 与全生命周期超时的线上验证亦需 Product Owner 重新部署 `breakdown` 函数（本 Agent 无 supabase CLI）。

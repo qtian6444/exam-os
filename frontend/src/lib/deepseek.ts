@@ -17,7 +17,11 @@ const FUNCTION_URL = `${supabaseUrl}/functions/v1/breakdown`;
 
 const MAX_SENTENCE_LENGTH = 500;
 const MAX_CONTEXT_LENGTH = 2000;
-const REQUEST_TIMEOUT_MS = 20_000;
+
+// ONE user action = ONE wall-clock deadline. This budget spans token acquisition
+// AND all retry attempts — a retry uses the *remaining* budget, never a fresh
+// full timeout.
+export const TOTAL_TIMEOUT_MS = 20_000;
 const MAX_ATTEMPTS = 2;
 
 const BreakdownSchema = z
@@ -45,13 +49,38 @@ function isRecoverable(err: unknown): boolean {
   return err instanceof BreakdownError && err.recoverable;
 }
 
+/**
+ * Bounds `promise` to `ms` milliseconds at the Promise level. Unlike an
+ * AbortController this cannot cancel the underlying work, but it guarantees the
+ * caller-observable Promise settles by the deadline — which is what matters for
+ * a value read (like getAccessToken) that has no AbortSignal hook. A late
+ * resolution of the wrapped promise is simply dropped.
+ */
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new BreakdownError('TIMEOUT', true, 'Deadline exceeded')),
+      ms,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 async function callBreakdownEdgeFunction(
   sentence: string,
   context: string,
+  token: string,
   signal: AbortSignal,
 ): Promise<BreakdownResult> {
-  const token = await getAccessToken();
-
   let resp: Response;
   try {
     resp = await fetch(FUNCTION_URL, {
@@ -116,21 +145,36 @@ export async function getBreakdown(
   const safeContext = context.slice(0, MAX_CONTEXT_LENGTH);
   const externalSignal = options?.signal;
 
+  // One total deadline for the whole action (token acquisition + all retries).
+  const deadline = Date.now() + TOTAL_TIMEOUT_MS;
+
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new BreakdownError('TIMEOUT', true, 'Deadline exceeded');
+    }
+
     if (externalSignal?.aborted) {
       throw new BreakdownError('REQUEST_ABORTED', false, 'Request aborted');
     }
 
+    // Token acquisition is INSIDE the deadline. getAccessToken() has no
+    // AbortSignal hook, so bound it at the Promise level — the observable
+    // promise ends at the deadline even if the underlying read hangs. A TIMEOUT
+    // (whole budget exhausted) or any other token error propagates directly.
+    const token = await withTimeout(getAccessToken(), remaining);
+
+    // The fetch attempt is bounded by the REMAINING budget, not a fresh timeout.
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), remaining);
     const onExternalAbort = () => controller.abort();
     if (externalSignal) {
       externalSignal.addEventListener('abort', onExternalAbort, { once: true });
     }
 
     try {
-      return await callBreakdownEdgeFunction(safeSentence, safeContext, controller.signal);
+      return await callBreakdownEdgeFunction(safeSentence, safeContext, token, controller.signal);
     } catch (err) {
       // Abort caused by the caller (unmount) → non-recoverable, stop now.
       if (err instanceof BreakdownError && err.code === 'ABORTED' && externalSignal?.aborted) {
