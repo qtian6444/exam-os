@@ -45,29 +45,78 @@ export function isSameLearningOperation(
 
 // ── User Profile ──
 
-export async function upsertUserProfile(profile: {
+export interface ProfileSettings {
   examType: ExamType;
   examBatch: ExamBatch;
   dailyTime: DailyTime;
-}): Promise<string | null> {
-  const userId = await getAuthUserId();
+}
 
-  const { error } = await supabase.from('user_profile').upsert(
-    {
-      user_id: userId,
-      exam_type: profile.examType,
-      exam_batch: profile.examBatch,
-      daily_time: profile.dailyTime,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'user_id' },
-  );
+// The USER_EDITABLE column set, shared by CREATE and UPDATE so the two paths
+// can never drift. user_id (identity) is deliberately NOT here: it is INSERT-only
+// and only ever set once to auth.uid(). ability_* / confidence_* are never here —
+// they are SYSTEM_AUTHORITATIVE and only the SECURITY DEFINER RPC may write them.
+function editableProfilePayload(profile: ProfileSettings) {
+  return {
+    exam_type: profile.examType,
+    exam_batch: profile.examBatch,
+    daily_time: profile.dailyTime,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+type CreateProfileResult =
+  | { ok: true; userId: string }
+  | { ok: false; duplicate: boolean };
+
+// CREATE path: INSERT identity (user_id = auth.uid()) + USER_EDITABLE columns.
+// A pre-existing profile surfaces as PostgREST error code 23505 (unique violation
+// on user_id) — the deterministic "already exists" signal for the coordinator.
+async function tryCreateProfile(profile: ProfileSettings): Promise<CreateProfileResult> {
+  const userId = await getAuthUserId();
+  const { error } = await supabase.from('user_profile').insert({
+    user_id: userId,
+    ...editableProfilePayload(profile),
+  });
+  if (!error) return { ok: true, userId };
+  return { ok: false, duplicate: error.code === '23505' };
+}
+
+// UPDATE path: USER_EDITABLE columns only — the payload never contains user_id or
+// any authoritative (ability_* / confidence_*) column, so the request itself
+// conforms to the column-level privilege model (no UPDATE(user_id) needed, owner
+// immutability preserved).
+export async function updateUserProfile(profile: ProfileSettings): Promise<string | null> {
+  const userId = await getAuthUserId();
+  const { data, error } = await supabase
+    .from('user_profile')
+    .update(editableProfilePayload(profile))
+    .eq('user_id', userId)
+    .select('user_id');
 
   if (error) {
-    console.error('[DB] upsertUserProfile failed:', error);
+    console.error('[DB] updateUserProfile failed:', error);
+    return null;
+  }
+  if (!isProfileUpdateApplied(data)) {
+    // 0 rows: no owned profile row (missing, or RLS blocked the match). A real
+    // failure, never a silent success.
+    console.error('[DB] updateUserProfile: no matching profile row');
     return null;
   }
   return userId;
+}
+
+// Persist onboarding settings. First-time onboarding CREATES the profile; a
+// returning user (same auth.uid()) UPDATES the existing row. The old merge-upsert
+// (INSERT ... ON CONFLICT DO UPDATE) is gone: PostgREST would fold user_id into
+// the UPDATE set and require UPDATE(user_id), violating owner immutability.
+export async function persistUserProfile(profile: ProfileSettings): Promise<string | null> {
+  const created = await tryCreateProfile(profile);
+  if (created.ok) return created.userId;
+  if (created.duplicate) return updateUserProfile(profile);
+  // permission / network / other → surface, never swallow.
+  console.error('[DB] persistUserProfile insert failed');
+  return null;
 }
 
 export interface ProfileAbilityRow {

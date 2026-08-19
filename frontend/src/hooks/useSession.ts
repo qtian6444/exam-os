@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import type { UserProfile, SessionData, AppStage } from '../types';
-import { upsertUserProfile } from '../lib/db';
+import { persistUserProfile } from '../lib/db';
 
 function generateId(): string {
   return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -33,13 +33,13 @@ export function useSession() {
       // their progress is being saved when it is not.
       let userId: string | null;
       try {
-        userId = await upsertUserProfile({
+        userId = await persistUserProfile({
           examType: finalProfile.examType as any,
           examBatch: finalProfile.examBatch as any,
           dailyTime: finalProfile.dailyTime as any,
         });
       } catch (err) {
-        console.error('[Session] upsertUserProfile threw:', err);
+        console.error('[Session] persistUserProfile threw:', err);
         return false;
       }
 

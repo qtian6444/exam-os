@@ -8,18 +8,21 @@ vi.mock('./supabase', () => ({
   getAuthUserId: vi.fn(),
 }));
 
-import { supabase } from './supabase';
+import { supabase, getAuthUserId } from './supabase';
 import {
   stableUuid,
   isSameLearningOperation,
   resolveAbilitySnapshot,
   isProfileUpdateApplied,
   applyLearningEvidence,
+  persistUserProfile,
+  updateUserProfile,
   SAVE_TIMEOUT_MS,
   type ProfileAbilityRow,
 } from './db';
 
 const rpcMock = supabase.rpc as unknown as Mock;
+const getAuthUserIdMock = getAuthUserId as unknown as Mock;
 
 // applyLearningEvidence wires a bounded deadline through `.abortSignal()`. The
 // mock rpc returns a builder-shaped object whose `.abortSignal()` yields the
@@ -333,5 +336,135 @@ describe('applyLearningEvidence (atomic RPC — single-call persistence)', () =>
     const second = rpcMock.mock.calls[1][1].p_operation_id;
     expect(typeof first).toBe('string');
     expect(second).toBe(first);
+  });
+});
+
+// ── R8: profile persistence column-ownership contract ──
+//
+// ENG-R7-001: the old merge-upsert folded user_id into the UPDATE set and would
+// have required UPDATE(user_id) (owner immutability violation). The CREATE path
+// must send identity + editable columns; the UPDATE path must send editable
+// columns only (no user_id, no authoritative fields). These tests assert the
+// actual operation/payload handed to the Supabase query builder — not just the
+// helper return value.
+describe('persistUserProfile / updateUserProfile (profile column-ownership contract)', () => {
+  const fromMock = supabase.from as unknown as Mock;
+  const insertMock = vi.fn();
+  const updateMock = vi.fn();
+  const eqMock = vi.fn();
+  const selectMock = vi.fn();
+  const updateChain = { eq: eqMock, select: selectMock };
+
+  beforeEach(() => {
+    fromMock.mockReset();
+    insertMock.mockReset();
+    updateMock.mockReset();
+    eqMock.mockReset();
+    selectMock.mockReset();
+    getAuthUserIdMock.mockReset();
+
+    getAuthUserIdMock.mockResolvedValue('uid-123');
+    eqMock.mockReturnValue(updateChain);
+    updateMock.mockReturnValue(updateChain);
+    fromMock.mockReturnValue({ insert: insertMock, update: updateMock });
+  });
+
+  const profile = {
+    examType: 'CET4',
+    examBatch: '2026-12',
+    dailyTime: '20min',
+  } as const;
+
+  it('CREATE path: INSERT sends user_id + editable columns, no authoritative fields', async () => {
+    insertMock.mockResolvedValue({ data: null, error: null });
+
+    const uid = await persistUserProfile(profile);
+
+    expect(uid).toBe('uid-123');
+    expect(fromMock).toHaveBeenCalledWith('user_profile');
+    expect(insertMock).toHaveBeenCalledTimes(1);
+    const payload = insertMock.mock.calls[0][0];
+    expect(payload).toEqual({
+      user_id: 'uid-123',
+      exam_type: 'CET4',
+      exam_batch: '2026-12',
+      daily_time: '20min',
+      updated_at: expect.any(String),
+    });
+    expect(payload).not.toHaveProperty('ability_sentence');
+    expect(payload).not.toHaveProperty('confidence_sentence');
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it('UPDATE path (duplicate user_id): UPDATE sends editable columns only — no user_id, no authoritative', async () => {
+    insertMock.mockResolvedValue({ data: null, error: { code: '23505', message: 'duplicate key' } });
+    selectMock.mockResolvedValue({ data: [{ user_id: 'uid-123' }], error: null });
+
+    const uid = await persistUserProfile(profile);
+
+    expect(uid).toBe('uid-123');
+    expect(insertMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    const payload = updateMock.mock.calls[0][0];
+    expect(payload).toEqual({
+      exam_type: 'CET4',
+      exam_batch: '2026-12',
+      daily_time: '20min',
+      updated_at: expect.any(String),
+    });
+    expect(payload).not.toHaveProperty('user_id');
+    expect(payload).not.toHaveProperty('ability_sentence');
+    expect(payload).not.toHaveProperty('confidence_sentence');
+    expect(eqMock).toHaveBeenCalledWith('user_id', 'uid-123');
+    expect(selectMock).toHaveBeenCalledWith('user_id');
+  });
+
+  it('updateUserProfile directly: UPDATE payload has no user_id and no authoritative fields', async () => {
+    selectMock.mockResolvedValue({ data: [{ user_id: 'uid-123' }], error: null });
+
+    const uid = await updateUserProfile(profile);
+
+    expect(uid).toBe('uid-123');
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    const payload = updateMock.mock.calls[0][0];
+    const authoritative = [
+      'ability_vocabulary', 'ability_sentence', 'ability_reading', 'ability_listening', 'ability_writing',
+      'confidence_vocabulary', 'confidence_sentence', 'confidence_reading', 'confidence_listening', 'confidence_writing',
+    ];
+    expect(payload).not.toHaveProperty('user_id');
+    for (const col of authoritative) {
+      expect(payload).not.toHaveProperty(col);
+    }
+    expect(eqMock).toHaveBeenCalledWith('user_id', 'uid-123');
+  });
+
+  it('CREATE path sends no arbitrary ability/confidence fields', async () => {
+    insertMock.mockResolvedValue({ data: null, error: null });
+    await persistUserProfile(profile);
+    const payload = insertMock.mock.calls[0][0];
+    const authoritative = [
+      'ability_vocabulary', 'ability_sentence', 'ability_reading', 'ability_listening', 'ability_writing',
+      'confidence_vocabulary', 'confidence_sentence', 'confidence_reading', 'confidence_listening', 'confidence_writing',
+    ];
+    for (const col of authoritative) {
+      expect(payload).not.toHaveProperty(col);
+    }
+  });
+
+  it('DB failure (non-23505) is NOT swallowed and does NOT fall through to update', async () => {
+    insertMock.mockResolvedValue({ data: null, error: { code: '42501', message: 'permission denied' } });
+
+    const uid = await persistUserProfile(profile);
+
+    expect(uid).toBeNull();
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it('updateUserProfile with 0 rows (cross-user / missing) → null, never silent success', async () => {
+    selectMock.mockResolvedValue({ data: [], error: null });
+
+    const uid = await updateUserProfile(profile);
+
+    expect(uid).toBeNull();
   });
 });
