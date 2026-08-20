@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import type { AbilitySnapshot, AbilityKey } from '../lib/ability';
 import { getAbilityKey, blankSnapshot } from '../lib/ability';
 import { getAbilitySnapshot } from '../lib/db';
-import { generateSuggestion } from '../lib/suggestion';
+import { generateSuggestion, analyzeResult } from '../lib/suggestion';
 
 interface Props {
   cardsCompleted: number;
@@ -52,6 +52,7 @@ export default function SessionComplete({ cardsCompleted, elapsed, beforeSnapsho
   const before = beforeSnapshot ?? blankSnapshot();
   const after = afterSnapshot ?? before;
   const suggestion = generateSuggestion(after);
+  const feedback = analyzeResult(before, after, cardsCompleted);
 
   return (
     <motion.div
@@ -103,15 +104,35 @@ export default function SessionComplete({ cardsCompleted, elapsed, beforeSnapsho
       </section>
 
       <section className="result__section">
-        <h3 className="result__section-title">AI 学习建议</h3>
+        <h3 className="result__section-title">AI 小结</h3>
         <p className="result__suggestion-headline">{suggestion.headline}</p>
-        <ul className="result__suggestion-items">
-          {suggestion.items.map((item) => (
-            <li key={item} className="result__suggestion-item">
-              {item}
-            </li>
-          ))}
-        </ul>
+
+        <div className="result__feedback">
+          <span className="result__feedback-label">本次提升</span>
+          <ul className="result__suggestion-items">
+            {feedback.improvements.map((item) => (
+              <li key={item} className="result__suggestion-item">
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="result__feedback">
+          <span className="result__feedback-label">当前薄弱</span>
+          <ul className="result__suggestion-items">
+            {feedback.weakPoints.map((item) => (
+              <li key={item} className="result__suggestion-item">
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="result__feedback">
+          <span className="result__feedback-label">下一步</span>
+          <p className="result__feedback-action">{feedback.nextAction}</p>
+        </div>
       </section>
 
       <motion.button

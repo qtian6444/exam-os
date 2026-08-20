@@ -712,6 +712,19 @@ body {
   color: #fff;
 }
 
+.dashboard__goal-text {
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.2px;
+}
+
+.dashboard__goal-action {
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
 .dashboard__suggestion-items,
 .result__suggestion-items {
   list-style: none;
@@ -850,4 +863,29 @@ body {
   font-size: 16px;
   font-weight: 600;
   color: #fff;
+}
+
+.result__feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.result__feedback + .result__feedback {
+  border-top: 1px solid var(--border);
+}
+
+.result__feedback-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+}
+
+.result__feedback-action {
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.6;
 }

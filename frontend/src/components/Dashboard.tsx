@@ -4,7 +4,7 @@ import type { AbilitySnapshot, AbilityKey } from '../lib/ability';
 import { getAbilityKey, getConfidenceKey, blankSnapshot } from '../lib/ability';
 import { getAbilitySnapshot } from '../lib/db';
 import { getLearningStats, type LearningStats } from '../lib/dashboard';
-import { generateSuggestion, type LearningSuggestion } from '../lib/suggestion';
+import { generateSuggestion, generateDailyGoal, type LearningSuggestion, type DailyGoal } from '../lib/suggestion';
 
 interface Props {
   onStart: () => Promise<boolean>;
@@ -57,7 +57,10 @@ export default function Dashboard({ onStart }: Props) {
     };
   }, []);
 
-  const suggestion: LearningSuggestion = generateSuggestion(ability ?? blankSnapshot());
+  const suggestion: LearningSuggestion = generateSuggestion(ability ?? blankSnapshot(), {
+    streak: stats.streak ?? 0,
+  });
+  const goal: DailyGoal = generateDailyGoal(ability ?? blankSnapshot());
   const hasAbility = ability !== null && DIMENSIONS.some((d) => getAbilityKey(ability, d.key) > 0);
 
   const handleStart = async () => {
@@ -83,7 +86,7 @@ export default function Dashboard({ onStart }: Props) {
     >
       <header className="dashboard__header">
         <h1 className="dashboard__title">Exam OS</h1>
-        <p className="dashboard__subtitle">今天也要进步一点</p>
+        <p className="dashboard__subtitle">你的 AI 英语学习操作系统</p>
       </header>
 
       <div className="dashboard__stats">
@@ -100,6 +103,12 @@ export default function Dashboard({ onStart }: Props) {
           <span className="dashboard__stat-label">连续天数</span>
         </div>
       </div>
+
+      <section className="dashboard__section dashboard__goal">
+        <h2 className="dashboard__section-title">今日学习目标</h2>
+        <p className="dashboard__goal-text">{goal.goal}</p>
+        <p className="dashboard__goal-action">{goal.action}</p>
+      </section>
 
       <section className="dashboard__section">
         <h2 className="dashboard__section-title">能力评分</h2>
@@ -133,7 +142,7 @@ export default function Dashboard({ onStart }: Props) {
       </section>
 
       <section className="dashboard__section dashboard__suggestion">
-        <h2 className="dashboard__section-title">学习建议</h2>
+        <h2 className="dashboard__section-title">AI 学习建议</h2>
         <p className="dashboard__suggestion-headline">{suggestion.headline}</p>
         <ul className="dashboard__suggestion-items">
           {suggestion.items.map((item) => (
@@ -156,7 +165,7 @@ export default function Dashboard({ onStart }: Props) {
         disabled={starting}
         whileTap={{ scale: 0.97 }}
       >
-        {starting ? '准备中…' : '开始学习'}
+        {starting ? '准备中…' : '开始今日学习'}
       </motion.button>
     </motion.div>
   );
