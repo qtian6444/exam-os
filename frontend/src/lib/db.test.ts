@@ -397,7 +397,10 @@ describe('persistUserProfile / updateUserProfile (profile column-ownership contr
   });
 
   it('UPDATE path (duplicate user_id): UPDATE sends editable columns only — no user_id, no authoritative', async () => {
-    insertMock.mockResolvedValue({ data: null, error: { code: '23505', message: 'duplicate key' } });
+    insertMock.mockResolvedValue({
+      data: null,
+      error: { code: '23505', message: 'duplicate key value violates unique constraint "user_profile_user_id_key"' },
+    });
     selectMock.mockResolvedValue({ data: [{ user_id: 'uid-123' }], error: null });
 
     const uid = await persistUserProfile(profile);
@@ -453,6 +456,41 @@ describe('persistUserProfile / updateUserProfile (profile column-ownership contr
 
   it('DB failure (non-23505) is NOT swallowed and does NOT fall through to update', async () => {
     insertMock.mockResolvedValue({ data: null, error: { code: '42501', message: 'permission denied' } });
+
+    const uid = await persistUserProfile(profile);
+
+    expect(uid).toBeNull();
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it('unrelated 23505 (NOT the user_id constraint) is NOT a duplicate → no UPDATE, hard fail', async () => {
+    // 23505 can come from more than one unique constraint (user_profile has a
+    // PK on id AND a UNIQUE on user_id). Only the user_id-key violation may enter
+    // the existing-profile UPDATE path; any other 23505 must surface as failure.
+    insertMock.mockResolvedValue({
+      data: null,
+      error: { code: '23505', message: 'duplicate key value violates unique constraint "user_profile_pkey"' },
+    });
+
+    const uid = await persistUserProfile(profile);
+
+    expect(uid).toBeNull();
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it('23505 with a missing/empty message is NOT trusted as duplicate → no UPDATE', async () => {
+    // Defensive: if the transport drops error.message, we must NOT guess that the
+    // violation is the user_id key. Missing constraint identity → treat as failure.
+    insertMock.mockResolvedValue({ data: null, error: { code: '23505', message: undefined } });
+
+    const uid = await persistUserProfile(profile);
+
+    expect(uid).toBeNull();
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it('network/transport error (no code) is NOT a duplicate → no UPDATE', async () => {
+    insertMock.mockResolvedValue({ data: null, error: { message: 'fetch failed' } });
 
     const uid = await persistUserProfile(profile);
 

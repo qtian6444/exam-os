@@ -68,9 +68,23 @@ type CreateProfileResult =
   | { ok: true; userId: string }
   | { ok: false; duplicate: boolean };
 
+// A 23505 (unique violation) is only "profile already exists" when it fired on
+// the user_id unique constraint (user_profile_user_id_key). user_profile also has
+// a PRIMARY KEY on id, so 23505 is NOT a single-constraint signal — an unrelated
+// unique violation (e.g. a future unique column, or a primary-key collision) is a
+// REAL error and must fail, never fall through to UPDATE. PostgREST echoes the
+// constraint name in error.message, so we match on that rather than the bare code.
+function isDuplicateUserProfile(
+  error: { code?: string; message?: string } | null | undefined,
+): boolean {
+  return error?.code === '23505' && !!error?.message?.includes('user_profile_user_id_key');
+}
+
 // CREATE path: INSERT identity (user_id = auth.uid()) + USER_EDITABLE columns.
-// A pre-existing profile surfaces as PostgREST error code 23505 (unique violation
-// on user_id) — the deterministic "already exists" signal for the coordinator.
+// A pre-existing profile surfaces as PostgREST error code 23505 on the user_id
+// unique constraint — the deterministic "already exists" signal for the
+// coordinator. Any OTHER error (including an unrelated 23505) is NOT a duplicate
+// signal and must fall through to the hard-fail branch below.
 async function tryCreateProfile(profile: ProfileSettings): Promise<CreateProfileResult> {
   const userId = await getAuthUserId();
   const { error } = await supabase.from('user_profile').insert({
@@ -78,7 +92,7 @@ async function tryCreateProfile(profile: ProfileSettings): Promise<CreateProfile
     ...editableProfilePayload(profile),
   });
   if (!error) return { ok: true, userId };
-  return { ok: false, duplicate: error.code === '23505' };
+  return { ok: false, duplicate: isDuplicateUserProfile(error) };
 }
 
 // UPDATE path: USER_EDITABLE columns only — the payload never contains user_id or
