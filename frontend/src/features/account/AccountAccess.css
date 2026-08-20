@@ -1,0 +1,82 @@
+.account-access__entry {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 10;
+  padding: 8px 14px;
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--text-dim);
+  background: rgba(26, 26, 26, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.account-access__entry:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.account-access__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(8px);
+}
+
+.account-access__dialog {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  padding: 24px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.account-access__close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 1;
+  width: 36px;
+  height: 36px;
+  font-family: var(--font);
+  font-size: 26px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.account-access__close:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+@media (max-width: 520px) {
+  .account-access__entry {
+    top: 12px;
+    right: 12px;
+  }
+
+  .account-access__overlay {
+    align-items: flex-start;
+    padding: 12px;
+  }
+
+  .account-access__dialog {
+    margin-top: 12px;
+    padding: 20px;
+  }
+}

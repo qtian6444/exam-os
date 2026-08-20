@@ -3,6 +3,7 @@ import { AnimatePresence } from 'framer-motion';
 import Dashboard from './components/Dashboard';
 import LearningShell from './components/LearningShell';
 import SessionComplete from './components/SessionComplete';
+import AccountAccess from './features/account/AccountAccess';
 import { useSession } from './hooks/useSession';
 
 export default function App() {
@@ -25,6 +26,8 @@ export default function App() {
 
   return (
     <div className="app">
+      {stage === 'dashboard' && <AccountAccess />}
+
       <AnimatePresence mode="wait">
         {stage === 'dashboard' && (
           <Dashboard key="dashboard" onStart={startLearning} />
