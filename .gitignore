@@ -15,6 +15,8 @@ npm-debug.log*
 *.jpeg
 *.png
 *.gif
+!frontend/public/*.jpg
+!frontend/public/*.png
 kimi-vision.js
 /data/
 

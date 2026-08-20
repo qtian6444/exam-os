@@ -23,7 +23,8 @@ export default function AccountWechatView({
 }: AccountWechatViewProps) {
   const configuredQrUrl =
     qrUrl === undefined
-      ? configuredValue('VITE_ACCOUNT_WECHAT_QR_URL') || '/wechat-qr.jpg'
+      ? configuredValue('VITE_ACCOUNT_WECHAT_QR_URL') ||
+        `${import.meta.env.BASE_URL}wechat-qr.jpg`
       : (qrUrl ?? '');
   const [imageFailed, setImageFailed] = useState(false);
 

@@ -14,7 +14,9 @@ describe('AccountWechatView', () => {
     const image = screen.getByRole('img', {
       name: '添加微信睡个好觉的二维码',
     }) as HTMLImageElement;
-    expect(image.getAttribute('src')).toBe('/wechat-qr.jpg');
+    expect(image.getAttribute('src')).toBe(
+      `${import.meta.env.BASE_URL}wechat-qr.jpg`,
+    );
     expect(screen.getByText('微信昵称：睡个好觉')).toBeTruthy();
   });
 
@@ -49,6 +51,25 @@ describe('AccountWechatView', () => {
       name: '添加微信学习助手的二维码',
     }) as HTMLImageElement;
     expect(image.getAttribute('src')).toBe('/wechat-qr.png');
+  });
+
+  it('falls back to the placeholder when the QR image fails to load', () => {
+    render(
+      <AccountWechatView
+        onLogin={vi.fn()}
+        onGuestTry={vi.fn()}
+        qrUrl="/broken-qr.jpg"
+        displayName="学习助手"
+      />,
+    );
+
+    const image = screen.getByRole('img', {
+      name: '添加微信学习助手的二维码',
+    });
+    fireEvent.error(image);
+
+    expect(screen.getByLabelText('微信二维码待配置')).toBeTruthy();
+    expect(screen.queryByRole('img', { name: '添加微信学习助手的二维码' })).toBeNull();
   });
 
   it('provides explicit login and guest exits', () => {
