@@ -1,40 +1,33 @@
 import { useCallback } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import OnboardingFlow from './components/onboarding/OnboardingFlow';
+import Dashboard from './components/Dashboard';
 import LearningShell from './components/LearningShell';
 import SessionComplete from './components/SessionComplete';
 import { useSession } from './hooks/useSession';
-import type { ExamType, ExamBatch, DailyTime } from './types';
 
 export default function App() {
-  const { stage, startLearning, completeSession, session } = useSession();
-
-  const handleOnboardingComplete = useCallback(
-    (profile: { examType: ExamType; examBatch: ExamBatch; dailyTime: DailyTime }) => {
-      return startLearning(profile);
-    },
-    [startLearning],
-  );
+  const {
+    stage,
+    session,
+    beforeSnapshot,
+    lastStats,
+    startLearning,
+    completeSession,
+    backToDashboard,
+  } = useSession();
 
   const handleLearningComplete = useCallback(
-    (_stats: { cardsCompleted: number; elapsed: number }) => {
-      completeSession();
+    (stats: { cardsCompleted: number; elapsed: number }) => {
+      completeSession(stats);
     },
     [completeSession],
   );
 
-  const handleRestart = useCallback(() => {
-    window.location.reload();
-  }, []);
-
   return (
     <div className="app">
       <AnimatePresence mode="wait">
-        {stage === 'onboarding' && (
-          <OnboardingFlow
-            key="onboarding"
-            onComplete={handleOnboardingComplete}
-          />
+        {stage === 'dashboard' && (
+          <Dashboard key="dashboard" onStart={startLearning} />
         )}
 
         {stage === 'learning' && (
@@ -45,16 +38,13 @@ export default function App() {
           />
         )}
 
-        {stage === 'complete' && (
+        {stage === 'result' && (
           <SessionComplete
-            key="complete"
-            cardsCompleted={session.current.cardsCompleted}
-            elapsed={
-              session.current.endTime
-                ? session.current.endTime - session.current.startTime
-                : 0
-            }
-            onRestart={handleRestart}
+            key="result"
+            cardsCompleted={lastStats?.cardsCompleted ?? 0}
+            elapsed={lastStats?.elapsed ?? 0}
+            beforeSnapshot={beforeSnapshot}
+            onBack={backToDashboard}
           />
         )}
       </AnimatePresence>

@@ -150,7 +150,9 @@ export interface UserProfile {
 
 export enum AppStage {
   ONBOARDING = 'onboarding',
+  DASHBOARD = 'dashboard',
   LEARNING = 'learning',
+  RESULT = 'result',
   COMPLETE = 'complete',
 }
 

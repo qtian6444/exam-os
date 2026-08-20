@@ -36,49 +36,7 @@ function buildCardQueue(): LearningCard[] {
     content: null,
   } as ReadingBreakdownCardData);
 
-  // Card 3: Choice — goal preference
-  cards.push({
-    cardId: 'choice-goal',
-    cardType: CardType.CHOICE,
-    flowStep: 'initial_choice',
-    sentence: '',
-    options: [
-      { id: 'opt-pass', text: '我只要过线就好' },
-      { id: 'opt-excel', text: '我想考一个好分数' },
-    ],
-    correctOptionId: '',
-  } as ChoiceCardData);
-
-  // Card 4: Reading Breakdown — Grit sentence
-  cards.push({
-    cardId: 'breakdown-002',
-    cardType: CardType.READING_BREAKDOWN,
-    state: 'loading',
-    sentence: breakdownSentences[2].sentence,
-    content: null,
-  } as ReadingBreakdownCardData);
-
-  // Card 5: Reorder — real CET-4 sentence (Dress)
-  cards.push({
-    cardId: 'reorder-001',
-    cardType: CardType.REORDER,
-    chunks: reorderSentences[2].chunks.map((text, i) => ({
-      id: String.fromCharCode(97 + i), // a, b, c, d...
-      text,
-    })),
-    correctOrder: ['a', 'b', 'c', 'd'],
-  } as ReorderCardData);
-
-  // Card 6: Reading Breakdown — Dress sentence
-  cards.push({
-    cardId: 'breakdown-003',
-    cardType: CardType.READING_BREAKDOWN,
-    state: 'loading',
-    sentence: breakdownSentences[4].sentence,
-    content: null,
-  } as ReadingBreakdownCardData);
-
-  // Card 7: Choice — real CET-4 comprehension question (Pandas Q46)
+  // Card 3: Choice — real CET-4 comprehension question (Pandas Q46)
   cards.push({
     cardId: 'choice-q46',
     cardType: CardType.CHOICE,
@@ -93,16 +51,27 @@ function buildCardQueue(): LearningCard[] {
     correctOptionId: 'D',
   } as ChoiceCardData);
 
-  // Card 8: Reading Breakdown — Beauty sentence
+  // Card 4: Reorder — real CET-4 sentence (Dress)
   cards.push({
-    cardId: 'breakdown-004',
+    cardId: 'reorder-001',
+    cardType: CardType.REORDER,
+    chunks: reorderSentences[2].chunks.map((text, i) => ({
+      id: String.fromCharCode(97 + i), // a, b, c, d...
+      text,
+    })),
+    correctOrder: ['a', 'b', 'c', 'd'],
+  } as ReorderCardData);
+
+  // Card 5: Reading Breakdown — Grit sentence
+  cards.push({
+    cardId: 'breakdown-002',
     cardType: CardType.READING_BREAKDOWN,
     state: 'loading',
-    sentence: breakdownSentences[6].sentence,
+    sentence: breakdownSentences[2].sentence,
     content: null,
   } as ReadingBreakdownCardData);
 
-  // Card 9: Reorder — Grit sentence
+  // Card 6: Reorder — Grit sentence
   cards.push({
     cardId: 'reorder-002',
     cardType: CardType.REORDER,
@@ -112,15 +81,6 @@ function buildCardQueue(): LearningCard[] {
     })),
     correctOrder: ['a', 'b', 'c'],
   } as ReorderCardData);
-
-  // Card 10: Reading Breakdown — Plant-based meat sentence
-  cards.push({
-    cardId: 'breakdown-005',
-    cardType: CardType.READING_BREAKDOWN,
-    state: 'loading',
-    sentence: breakdownSentences[8].sentence,
-    content: null,
-  } as ReadingBreakdownCardData);
 
   return cards;
 }

@@ -1,18 +1,25 @@
 import { useState, useCallback, useRef } from 'react';
-import type { UserProfile, SessionData, AppStage } from '../types';
-import { persistUserProfile } from '../lib/db';
+import type { SessionData, AppStage } from '../types';
+import { getAbilitySnapshot } from '../lib/db';
+import { blankSnapshot, type AbilitySnapshot } from '../lib/ability';
+import { ensureProfileReady } from '../lib/dashboard';
+import { resetCardQueue } from '../data/mock';
 
 function generateId(): string {
   return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+export interface SessionStats {
+  cardsCompleted: number;
+  elapsed: number;
+}
+
 export function useSession() {
-  const [stage, setStage] = useState<AppStage>('onboarding' as AppStage);
-  const [profile, setProfile] = useState<UserProfile>({
-    examType: null,
-    examBatch: null,
-    dailyTime: null,
-  });
+  const [stage, setStage] = useState<AppStage>('dashboard' as AppStage);
+  // Ability snapshot captured just BEFORE this session. The Result page diffs it
+  // against a fresh post-session read to show the ability delta.
+  const [beforeSnapshot, setBeforeSnapshot] = useState<AbilitySnapshot | null>(null);
+  const [lastStats, setLastStats] = useState<SessionStats | null>(null);
 
   const sessionRef = useRef<SessionData>({
     sessionId: generateId(),
@@ -22,64 +29,54 @@ export function useSession() {
     actions: [],
   });
 
-  const updateProfile = useCallback((patch: Partial<UserProfile>) => {
-    setProfile((prev) => ({ ...prev, ...patch }));
+  const startLearning = useCallback(async (): Promise<boolean> => {
+    // Ensure a profile row exists (fresh anonymous user → create defaults) so
+    // the first apply_learning_evidence never hits PROFILE_NOT_FOUND.
+    const ready = await ensureProfileReady();
+    if (!ready) return false;
+
+    // Capture the ability snapshot BEFORE this session for the result delta.
+    let before: AbilitySnapshot;
+    try {
+      before = await getAbilitySnapshot();
+    } catch {
+      before = blankSnapshot();
+    }
+    setBeforeSnapshot(before);
+
+    // A new session starts a fresh card queue (no full-page reload needed).
+    resetCardQueue();
+    sessionRef.current = {
+      sessionId: generateId(),
+      startTime: Date.now(),
+      endTime: null,
+      cardsCompleted: 0,
+      actions: [],
+    };
+    setLastStats(null);
+    setStage('learning' as AppStage);
+    return true;
   }, []);
 
-  const startLearning = useCallback(
-    async (finalProfile: { examType: string; examBatch: string; dailyTime: string }): Promise<boolean> => {
-      // Persist user profile to Supabase. If this critical write fails we must
-      // NOT advance to the learning stage — the user would otherwise think
-      // their progress is being saved when it is not.
-      let userId: string | null;
-      try {
-        userId = await persistUserProfile({
-          examType: finalProfile.examType as any,
-          examBatch: finalProfile.examBatch as any,
-          dailyTime: finalProfile.dailyTime as any,
-        });
-      } catch (err) {
-        console.error('[Session] persistUserProfile threw:', err);
-        return false;
-      }
-
-      if (!userId) {
-        return false;
-      }
-
-      sessionRef.current = {
-        sessionId: generateId(),
-        startTime: Date.now(),
-        endTime: null,
-        cardsCompleted: 0,
-        actions: [],
-      };
-      setStage('learning' as AppStage);
-      return true;
-    },
-    [],
-  );
-
-  const completeSession = useCallback(() => {
+  const completeSession = useCallback((stats: SessionStats) => {
     sessionRef.current.endTime = Date.now();
-    setStage('complete' as AppStage);
+    sessionRef.current.cardsCompleted = stats.cardsCompleted;
+    setLastStats(stats);
+    setStage('result' as AppStage);
   }, []);
 
-  const recordAction = useCallback(
-    (action: SessionData['actions'][number]) => {
-      sessionRef.current.actions.push(action);
-      sessionRef.current.cardsCompleted += 1;
-    },
-    [],
-  );
+  const backToDashboard = useCallback(() => {
+    resetCardQueue();
+    setStage('dashboard' as AppStage);
+  }, []);
 
   return {
     stage,
-    profile,
     session: sessionRef,
-    updateProfile,
+    beforeSnapshot,
+    lastStats,
     startLearning,
     completeSession,
-    recordAction,
+    backToDashboard,
   };
 }
