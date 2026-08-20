@@ -1,10 +1,10 @@
 import type { AccountCredentials } from './accountTypes';
 
 export const PHONE_LENGTH = 11;
-export const PASSWORD_LENGTH = 6;
+export const PASSWORD_MIN_LENGTH = 6;
+export const PASSWORD_MAX_LENGTH = 72;
 
 const PHONE_PATTERN = /^1[3-9]\d{9}$/;
-const PASSWORD_PATTERN = /^\d{6}$/;
 
 export interface FieldErrors {
   phone?: string;
@@ -14,7 +14,7 @@ export interface FieldErrors {
 export const PHONE_EMPTY_MESSAGE = '请输入手机号';
 export const PHONE_FORMAT_MESSAGE = '请输入正确的手机号';
 export const PASSWORD_EMPTY_MESSAGE = '请输入密码';
-export const PASSWORD_RULE_MESSAGE = '当前初始密码为手机号后6位';
+export const PASSWORD_LENGTH_MESSAGE = '密码长度应为6至72位';
 
 export function validatePhoneFormat(phone: string): string | null {
   const trimmed = phone.trim();
@@ -25,19 +25,12 @@ export function validatePhoneFormat(phone: string): string | null {
 
 export function validatePasswordFormat(password: string): string | null {
   if (!password) return PASSWORD_EMPTY_MESSAGE;
-  if (!PASSWORD_PATTERN.test(password)) return PASSWORD_RULE_MESSAGE;
-  return null;
-}
-
-export function validateCredentialRule(
-  credentials: AccountCredentials,
-): string | null {
-  const phone = credentials.phone.trim();
-  const password = credentials.password;
-  if (!PHONE_PATTERN.test(phone) || !PASSWORD_PATTERN.test(password)) {
-    return null;
+  if (
+    password.length < PASSWORD_MIN_LENGTH ||
+    password.length > PASSWORD_MAX_LENGTH
+  ) {
+    return PASSWORD_LENGTH_MESSAGE;
   }
-  if (password !== phone.slice(-PASSWORD_LENGTH)) return PASSWORD_RULE_MESSAGE;
   return null;
 }
 
@@ -51,9 +44,6 @@ export function validateAccountForm(
   if (phoneError) errors.phone = phoneError;
   if (passwordError) {
     errors.password = passwordError;
-  } else {
-    const ruleError = validateCredentialRule(credentials);
-    if (ruleError) errors.password = ruleError;
   }
 
   return errors;

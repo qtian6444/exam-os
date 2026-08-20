@@ -2,11 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   isLocalCredentialFormatValid,
   PASSWORD_EMPTY_MESSAGE,
-  PASSWORD_RULE_MESSAGE,
+  PASSWORD_LENGTH_MESSAGE,
   PHONE_EMPTY_MESSAGE,
   PHONE_FORMAT_MESSAGE,
   validateAccountForm,
-  validateCredentialRule,
   validatePasswordFormat,
   validatePhoneFormat,
 } from './accountValidation';
@@ -19,24 +18,16 @@ describe('account validation', () => {
     expect(validatePhoneFormat(' 13812345678 ')).toBeNull();
   });
 
-  it('requires a six-digit password', () => {
+  it('accepts any password content within the supported length', () => {
     expect(validatePasswordFormat('')).toBe(PASSWORD_EMPTY_MESSAGE);
-    expect(validatePasswordFormat('12345')).toBe(PASSWORD_RULE_MESSAGE);
-    expect(validatePasswordFormat('abcdef')).toBe(PASSWORD_RULE_MESSAGE);
-    expect(validatePasswordFormat('345678')).toBeNull();
-  });
-
-  it('enforces the initial password rule without claiming authentication', () => {
-    expect(
-      validateCredentialRule({ phone: '13812345678', password: '345678' }),
-    ).toBeNull();
-    expect(
-      validateCredentialRule({ phone: '13812345678', password: '111111' }),
-    ).toBe(PASSWORD_RULE_MESSAGE);
+    expect(validatePasswordFormat('short')).toBe(PASSWORD_LENGTH_MESSAGE);
+    expect(validatePasswordFormat('a'.repeat(73))).toBe(PASSWORD_LENGTH_MESSAGE);
+    expect(validatePasswordFormat('Correct-Horse_2026!')).toBeNull();
+    expect(validatePasswordFormat('安全密码-2026')).toBeNull();
     expect(
       isLocalCredentialFormatValid({
         phone: '13812345678',
-        password: '345678',
+        password: 'Correct-Horse_2026!',
       }),
     ).toBe(true);
   });

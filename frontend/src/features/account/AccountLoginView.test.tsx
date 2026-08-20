@@ -17,7 +17,7 @@ function fillValidForm() {
     target: { value: '13812345678' },
   });
   fireEvent.change(screen.getByLabelText('密码'), {
-    target: { value: '345678' },
+    target: { value: 'Correct-Horse_2026!' },
   });
 }
 
@@ -51,7 +51,7 @@ describe('AccountLoginView', () => {
     expect(onLogin).toHaveBeenCalledTimes(1);
     expect(onLogin).toHaveBeenCalledWith({
       phone: '13812345678',
-      password: '345678',
+      password: 'Correct-Horse_2026!',
     });
     expect((button as HTMLButtonElement).disabled).toBe(true);
 
@@ -71,6 +71,7 @@ describe('AccountLoginView', () => {
     await waitFor(() =>
       expect(screen.getByText('账号或密码不正确')).toBeTruthy(),
     );
+    expect(screen.queryByText(/手机号后6位/)).toBeNull();
   });
 
   it('keeps the guest path available', () => {

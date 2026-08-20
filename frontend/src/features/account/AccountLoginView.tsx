@@ -1,6 +1,9 @@
 import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { validateAccountForm } from './accountValidation';
+import {
+  PASSWORD_MAX_LENGTH,
+  validateAccountForm,
+} from './accountValidation';
 import type { FieldErrors } from './accountValidation';
 import type {
   AccountCredentials,
@@ -125,12 +128,11 @@ export default function AccountLoginView({
               id="account-login-password"
               className="account-login__input"
               type={showPassword ? 'text' : 'password'}
-              inputMode="numeric"
               autoComplete="current-password"
-              maxLength={6}
+              maxLength={PASSWORD_MAX_LENGTH}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="请输入初始密码"
+              placeholder="请输入密码"
               disabled={isBusy}
               aria-invalid={fieldErrors.password ? true : undefined}
               aria-describedby={

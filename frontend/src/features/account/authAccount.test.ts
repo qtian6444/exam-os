@@ -7,7 +7,10 @@ import {
 } from './authAccount';
 import type { PasswordAuthClient } from './authAccount';
 
-const CREDENTIALS = { phone: '13812345678', password: '345678' };
+const CREDENTIALS = {
+  phone: '13812345678',
+  password: 'Correct-Horse_2026!',
+};
 
 function authResponse(
   response: Awaited<ReturnType<PasswordAuthClient['signInWithPassword']>>,
@@ -46,16 +49,23 @@ describe('mapAuthErrorToLoginResult', () => {
 describe('loginWithPhonePassword', () => {
   it('calls Supabase password auth with normalized credentials', async () => {
     const auth = authResponse({
-      data: { user: { id: 'permanent-user' }, session: { access_token: 'jwt' } },
+      data: {
+        user: { id: 'permanent-user', is_anonymous: false },
+        session: { access_token: 'jwt', refresh_token: 'refresh' },
+      },
       error: null,
     });
 
-    await expect(loginWithPhonePassword(CREDENTIALS, auth)).resolves.toBe(
-      'SUCCESS',
-    );
+    await expect(loginWithPhonePassword(CREDENTIALS, auth)).resolves.toEqual({
+      result: 'SUCCESS',
+      session: {
+        access_token: 'jwt',
+        refresh_token: 'refresh',
+      },
+    });
     expect(auth.signInWithPassword).toHaveBeenCalledWith({
       phone: '+8613812345678',
-      password: '345678',
+      password: 'Correct-Horse_2026!',
     });
   });
 
@@ -65,10 +75,25 @@ describe('loginWithPhonePassword', () => {
       error: { name: 'AuthInvalidCredentialsError', message: 'raw provider text' },
     });
 
-    await expect(loginWithPhonePassword(CREDENTIALS, auth)).resolves.toBe(
-      'INVALID_CREDENTIALS',
-    );
+    await expect(loginWithPhonePassword(CREDENTIALS, auth)).resolves.toEqual({
+      result: 'INVALID_CREDENTIALS',
+    });
     expect(Object.keys(auth)).toEqual(['signInWithPassword']);
+  });
+
+  it('maps wrong-password and missing-account responses to one safe result', async () => {
+    const wrongPassword = { code: 'invalid_credentials', message: 'Wrong password' };
+    const missingAccount = { status: 400, message: 'User not found' };
+
+    for (const error of [wrongPassword, missingAccount]) {
+      const auth = authResponse({
+        data: { user: null, session: null },
+        error,
+      });
+      await expect(loginWithPhonePassword(CREDENTIALS, auth)).resolves.toEqual({
+        result: 'INVALID_CREDENTIALS',
+      });
+    }
   });
 
   it('maps a rejected network call without exposing the provider error', async () => {
@@ -78,9 +103,9 @@ describe('loginWithPhonePassword', () => {
       }),
     };
 
-    await expect(loginWithPhonePassword(CREDENTIALS, auth)).resolves.toBe(
-      'NETWORK_ERROR',
-    );
+    await expect(loginWithPhonePassword(CREDENTIALS, auth)).resolves.toEqual({
+      result: 'NETWORK_ERROR',
+    });
   });
 });
 

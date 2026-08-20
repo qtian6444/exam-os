@@ -3,6 +3,11 @@ export interface AccountCredentials {
   password: string;
 }
 
+export interface AuthSessionTokens {
+  access_token: string;
+  refresh_token: string;
+}
+
 export type LoginResult =
   | 'SUCCESS'
   | 'INVALID_CREDENTIALS'
@@ -11,6 +16,10 @@ export type LoginResult =
   | 'UNKNOWN_ERROR';
 
 export type LoginFailure = Exclude<LoginResult, 'SUCCESS'>;
+
+export type PasswordLoginAttempt =
+  | { result: 'SUCCESS'; session: AuthSessionTokens }
+  | { result: LoginFailure };
 
 export type LoginUiStatus =
   | 'IDLE'

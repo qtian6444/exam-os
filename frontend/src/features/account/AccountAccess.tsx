@@ -1,29 +1,39 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import AccountLoginView from './AccountLoginView';
 import {
+  activateAccountSession,
   getCurrentAccountIdentity,
   loginWithPhonePassword,
 } from './authAccount';
 import type {
   AccountCredentials,
   AccountIdentity,
+  AuthSessionTokens,
   LoginResult,
+  PasswordLoginAttempt,
 } from './accountTypes';
 import './AccountAccess.css';
 
 interface AccountAccessProps {
   readIdentity?: () => Promise<AccountIdentity>;
-  login?: (credentials: AccountCredentials) => Promise<LoginResult>;
+  login?: (credentials: AccountCredentials) => Promise<PasswordLoginAttempt>;
+  activateSession?: (
+    session: AuthSessionTokens,
+  ) => Promise<LoginResult>;
   reloadPage?: () => void;
 }
 
 export default function AccountAccess({
   readIdentity = getCurrentAccountIdentity,
   login = loginWithPhonePassword,
+  activateSession = activateAccountSession,
   reloadPage = () => window.location.reload(),
 }: AccountAccessProps) {
   const [identity, setIdentity] = useState<AccountIdentity | null>(null);
   const [isOpen, setIsOpen] = useState(false);
+  const [isActivating, setIsActivating] = useState(false);
+  const activeRequestRef = useRef(0);
+  const committingRequestRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,14 +52,47 @@ export default function AccountAccess({
     };
   }, [readIdentity]);
 
+  useEffect(
+    () => () => {
+      activeRequestRef.current += 1;
+    },
+    [],
+  );
+
   if (identity !== 'ANONYMOUS') return null;
+
+  const closeDialog = () => {
+    if (committingRequestRef.current !== null) return;
+    activeRequestRef.current += 1;
+    setIsOpen(false);
+  };
 
   const handleLogin = async (
     credentials: AccountCredentials,
   ): Promise<LoginResult> => {
-    const result = await login(credentials);
-    if (result === 'SUCCESS') reloadPage();
-    return result;
+    const requestToken = ++activeRequestRef.current;
+    const attempt = await login(credentials);
+
+    if (requestToken !== activeRequestRef.current) return 'UNKNOWN_ERROR';
+    if (attempt.result !== 'SUCCESS') return attempt.result;
+
+    committingRequestRef.current = requestToken;
+    setIsActivating(true);
+    try {
+      const result = await activateSession(attempt.session);
+      if (requestToken !== activeRequestRef.current) return 'UNKNOWN_ERROR';
+      if (result === 'SUCCESS') reloadPage();
+      return result;
+    } catch {
+      return 'UNKNOWN_ERROR';
+    } finally {
+      if (committingRequestRef.current === requestToken) {
+        committingRequestRef.current = null;
+      }
+      if (activeRequestRef.current === requestToken) {
+        setIsActivating(false);
+      }
+    }
   };
 
   return (
@@ -73,14 +116,15 @@ export default function AccountAccess({
             <button
               type="button"
               className="account-access__close"
-              onClick={() => setIsOpen(false)}
+              onClick={closeDialog}
+              disabled={isActivating}
               aria-label="关闭账号登录"
             >
               ×
             </button>
             <AccountLoginView
               onLogin={handleLogin}
-              onGuestTry={() => setIsOpen(false)}
+              onGuestTry={closeDialog}
             />
           </section>
         </div>

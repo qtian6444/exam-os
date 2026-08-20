@@ -21,7 +21,7 @@ function fillValidForm() {
     target: { value: '13812345678' },
   });
   fireEvent.change(screen.getByLabelText('密码'), {
-    target: { value: '345678' },
+    target: { value: 'Correct-Horse_2026!' },
   });
 }
 
@@ -44,12 +44,17 @@ describe('AccountAccess', () => {
   });
 
   it('reloads only after Supabase login succeeds', async () => {
-    const login = vi.fn(async () => 'SUCCESS' as const);
+    const login = vi.fn(async () => ({
+      result: 'SUCCESS' as const,
+      session: { access_token: 'jwt', refresh_token: 'refresh' },
+    }));
+    const activateSession = vi.fn(async () => 'SUCCESS' as const);
     const reloadPage = vi.fn();
     render(
       <AccountAccess
         readIdentity={async () => 'ANONYMOUS'}
         login={login}
+        activateSession={activateSession}
         reloadPage={reloadPage}
       />,
     );
@@ -59,14 +64,20 @@ describe('AccountAccess', () => {
     fireEvent.click(screen.getByRole('button', { name: '登录' }));
 
     await waitFor(() => expect(reloadPage).toHaveBeenCalledTimes(1));
+    expect(activateSession).toHaveBeenCalledWith({
+      access_token: 'jwt',
+      refresh_token: 'refresh',
+    });
   });
 
   it('keeps the anonymous session active after a failed login', async () => {
     const reloadPage = vi.fn();
+    const activateSession = vi.fn(async () => 'SUCCESS' as const);
     render(
       <AccountAccess
         readIdentity={async () => 'ANONYMOUS'}
-        login={async () => 'INVALID_CREDENTIALS'}
+        login={async () => ({ result: 'INVALID_CREDENTIALS' })}
+        activateSession={activateSession}
         reloadPage={reloadPage}
       />,
     );
@@ -77,7 +88,48 @@ describe('AccountAccess', () => {
 
     await screen.findByText('账号或密码不正确');
     expect(reloadPage).not.toHaveBeenCalled();
+    expect(activateSession).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog', { name: '账号登录' })).toBeTruthy();
+  });
+
+  it('invalidates a delayed login when the dialog closes', async () => {
+    let resolveLogin!: (result: {
+      result: 'SUCCESS';
+      session: { access_token: string; refresh_token: string };
+    }) => void;
+    const login = vi.fn(
+      () =>
+        new Promise<{
+          result: 'SUCCESS';
+          session: { access_token: string; refresh_token: string };
+        }>((resolve) => {
+          resolveLogin = resolve;
+        }),
+    );
+    const activateSession = vi.fn(async () => 'SUCCESS' as const);
+    const reloadPage = vi.fn();
+    render(
+      <AccountAccess
+        readIdentity={async () => 'ANONYMOUS'}
+        login={login}
+        activateSession={activateSession}
+        reloadPage={reloadPage}
+      />,
+    );
+    await openLogin();
+    fillValidForm();
+
+    fireEvent.click(screen.getByRole('button', { name: '登录' }));
+    await waitFor(() => expect(login).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '关闭账号登录' }));
+    resolveLogin({
+      result: 'SUCCESS',
+      session: { access_token: 'late-jwt', refresh_token: 'late-refresh' },
+    });
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(activateSession).not.toHaveBeenCalled();
+    expect(reloadPage).not.toHaveBeenCalled();
   });
 
   it('returns to the existing guest experience without changing identity', async () => {
