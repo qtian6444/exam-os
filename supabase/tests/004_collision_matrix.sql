@@ -18,12 +18,12 @@
 --   DISPOSABLE TEST DATABASE or DEDICATED STAGING DATABASE.
 -- ══════════════════════════════
 --
--- Run AFTER migrations 001..005. psql script (uses \set / \gset / \echo), NOT
--- the SQL Editor:
---   psql "$DATABASE_URL" -f supabase/tests/004_collision_matrix.sql
--- A clean run prints one RUN_ID NOTICE, then 19 PASS NOTICE lines, then
--- `R6 collision matrix: ALL PASS`, and exits 0. Any uncaught FAIL aborts with a
--- non-zero exit — never a false green (`\set ON_ERROR_STOP on` below).
+-- Run AFTER migrations 001..005, directly in the Supabase Dashboard SQL Editor
+-- (no psql meta-commands: \set / \gset / \echo removed; run-unique values are
+-- carried via session GUCs + current_setting()). Paste the whole script and Run.
+-- A clean run prints one RUN_ID NOTICE, then 19 PASS NOTICE lines, then a final
+-- result row `R6 collision matrix: ALL PASS`. Any uncaught FAIL raises an
+-- exception and stops the script before that final row — never a false green.
 --
 -- ═══ Evidence honesty ═══
 --   AUTH CONTEXT   = synthetic: SET LOCAL "request.jwt.claim.sub" (the GUC that
@@ -44,8 +44,9 @@
 --   RUN_ID is printed at the start of every run. All synthetic user_id /
 --   operation-id values are fresh gen_random_uuid() per run, so residue can
 --   never collide with real user data. Cleanup (DELETE by synthetic user_id,
---   FK-respecting order) runs at the end. `\set ON_ERROR_STOP on` means a
---   mid-script FAIL aborts BEFORE cleanup, so cleanup may NOT run.
+--   FK-respecting order) runs at the end. The SQL Editor stops at the first
+--   errored statement, so a mid-script FAIL aborts BEFORE cleanup — cleanup may
+--   NOT run.
 --   Recovery: (1) discard/reset the disposable staging DB (preferred — this
 --   suite is staging-only), or (2) manually DELETE the residue rows whose
 --   user_id matches the printed run's synthetic UUIDs. There is deliberately no
@@ -53,39 +54,27 @@
 -- ═════════════════════
 -- ============================================================
 
--- Fail-fast: an uncaught test failure must abort the whole script with a
--- non-zero exit, never fall through to the final "ALL PASS" echo.
-\set ON_ERROR_STOP on
+-- Fail-fast: an uncaught test failure raises inside a DO block and errors that
+-- statement; the SQL Editor stops at the first errored statement, so it never
+-- reaches the final "ALL PASS" row. (psql's \set ON_ERROR_STOP has no SQL Editor
+-- equivalent — the editor's stop-at-first-error provides the same guard.)
 
 -- ── Run-unique namespace (fresh UUIDs every run → no cross-run collision) ──
+-- SQL Editor has no psql \gset / :'var'. Generate the run-unique values straight
+-- into the session-GUC namespace with gen_random_uuid() (VOLATILE → each call
+-- yields a distinct value). The bodies below read them via current_setting().
 SELECT
-  gen_random_uuid() AS run_id,
-  gen_random_uuid() AS ua,      -- USER_A
-  gen_random_uuid() AS ub,      -- USER_B
-  gen_random_uuid() AS op1,     -- OP1 (base operation, scenarios 1..12)
-  gen_random_uuid() AS op2,     -- OP2 (scenario 14)
-  gen_random_uuid() AS op12,    -- scenario 12 operation id
-  gen_random_uuid() AS op15a,   -- scenario 15 operation id #1
-  gen_random_uuid() AS op15b,   -- scenario 15 operation id #2
-  gen_random_uuid() AS u16,     -- scenario 16 user (no profile)
-  gen_random_uuid() AS op16,    -- scenario 16 operation id
-  gen_random_uuid() AS op17     -- scenario 17 operation id
-\gset
-
--- psql does NOT interpolate :'var' inside dollar-quoted bodies (DO $$ ... $$).
--- Carry the run-unique values into the bodies through the session-GUC namespace,
--- set OUTSIDE any dollar-quote here, read via current_setting() below.
-SELECT set_config('r9.run_id', :'run_id', false);
-SELECT set_config('r9.ua',      :'ua',      false);
-SELECT set_config('r9.ub',      :'ub',      false);
-SELECT set_config('r9.u16',     :'u16',     false);
-SELECT set_config('r9.op1',     :'op1',     false);
-SELECT set_config('r9.op2',     :'op2',     false);
-SELECT set_config('r9.op12',    :'op12',    false);
-SELECT set_config('r9.op15a',   :'op15a',   false);
-SELECT set_config('r9.op15b',   :'op15b',   false);
-SELECT set_config('r9.op16',    :'op16',    false);
-SELECT set_config('r9.op17',    :'op17',    false);
+  set_config('r9.run_id', gen_random_uuid()::text, false) AS run_id,
+  set_config('r9.ua',     gen_random_uuid()::text, false) AS ua,      -- USER_A
+  set_config('r9.ub',     gen_random_uuid()::text, false) AS ub,      -- USER_B
+  set_config('r9.u16',    gen_random_uuid()::text, false) AS u16,     -- scenario 16 user (no profile)
+  set_config('r9.op1',    gen_random_uuid()::text, false) AS op1,     -- OP1 (base operation, scenarios 1..12)
+  set_config('r9.op2',    gen_random_uuid()::text, false) AS op2,     -- OP2 (scenario 14)
+  set_config('r9.op12',   gen_random_uuid()::text, false) AS op12,    -- scenario 12 operation id
+  set_config('r9.op15a',  gen_random_uuid()::text, false) AS op15a,   -- scenario 15 operation id #1
+  set_config('r9.op15b',  gen_random_uuid()::text, false) AS op15b,   -- scenario 15 operation id #2
+  set_config('r9.op16',   gen_random_uuid()::text, false) AS op16,    -- scenario 16 operation id
+  set_config('r9.op17',   gen_random_uuid()::text, false) AS op17;    -- scenario 17 operation id
 
 DO $$
 BEGIN
@@ -94,12 +83,12 @@ END $$;
 
 -- Profiles must exist for the RPC (it raises PROFILE_NOT_FOUND otherwise).
 -- Setup runs as the script owner (superuser), which bypasses RLS.
-INSERT INTO user_profile (user_id) VALUES (:'ua') ON CONFLICT (user_id) DO NOTHING;
-INSERT INTO user_profile (user_id) VALUES (:'ub') ON CONFLICT (user_id) DO NOTHING;
+INSERT INTO user_profile (user_id) VALUES (current_setting('r9.ua')) ON CONFLICT (user_id) DO NOTHING;
+INSERT INTO user_profile (user_id) VALUES (current_setting('r9.ub')) ON CONFLICT (user_id) DO NOTHING;
 
 -- ═══ SCENARIO 1..2: USER_A, base payload choice/true/{"selectedOptionId":"a"}/skip=false/difficulty=0.4 ═══
 BEGIN;
-  SET LOCAL "request.jwt.claim.sub" = :'ua';
+  SELECT set_config('request.jwt.claim.sub', current_setting('r9.ua'), true);
   DO $$
   DECLARE r jsonb;
   BEGIN
@@ -112,7 +101,7 @@ BEGIN;
 COMMIT;
 
 BEGIN;
-  SET LOCAL "request.jwt.claim.sub" = :'ua';
+  SELECT set_config('request.jwt.claim.sub', current_setting('r9.ua'), true);
   DO $$
   DECLARE r jsonb;
   BEGIN
@@ -251,7 +240,7 @@ END $$;
 -- COMMITS, a later retry of the SAME operation id returns IDEMPOTENT and does
 -- not re-apply evidence — the equivalent semantics of a lost-response retry.
 BEGIN;
-  SET LOCAL "request.jwt.claim.sub" = :'ua';
+  SELECT set_config('request.jwt.claim.sub', current_setting('r9.ua'), true);
   DO $$
   DECLARE r1 jsonb;
   BEGIN
@@ -264,7 +253,7 @@ BEGIN;
 COMMIT;
 
 BEGIN;
-  SET LOCAL "request.jwt.claim.sub" = :'ua';
+  SELECT set_config('request.jwt.claim.sub', current_setting('r9.ua'), true);
   DO $$
   DECLARE r2 jsonb;
   BEGIN
@@ -279,7 +268,7 @@ COMMIT;
 -- ═══ SCENARIO 15: different operation IDs (same user) both apply ═══
 -- Sequential coexistence, NOT a concurrency test (CONCURRENCY_RUNTIME = NOT_RUN).
 BEGIN;
-  SET LOCAL "request.jwt.claim.sub" = :'ua';
+  SELECT set_config('request.jwt.claim.sub', current_setting('r9.ua'), true);
   DO $$
   DECLARE r1 jsonb; r2 jsonb;
   BEGIN
@@ -297,7 +286,7 @@ COMMIT;
 -- writes. This is an EARLY failure, NOT a mid-write rollback
 -- (MID_WRITE_ROLLBACK_RUNTIME = NOT_RUN).
 BEGIN;
-  SET LOCAL "request.jwt.claim.sub" = :'u16';
+  SELECT set_config('request.jwt.claim.sub', current_setting('r9.u16'), true);
   DO $$
   DECLARE r jsonb;
   BEGIN
@@ -331,7 +320,7 @@ COMMIT;
 
 -- ═══ SCENARIO 18: cross-user same operation id → collision (not idempotent) ═══
 BEGIN;
-  SET LOCAL "request.jwt.claim.sub" = :'ub';
+  SELECT set_config('request.jwt.claim.sub', current_setting('r9.ub'), true);
   DO $$
   DECLARE r jsonb;
   BEGIN
@@ -346,9 +335,9 @@ BEGIN;
 COMMIT;
 
 -- ═══ CLEANUP: remove this run's synthetic rows (FK-respecting order) ═══
-DELETE FROM ability_history WHERE user_id IN (:'ua', :'ub', :'u16');
-DELETE FROM learning_record   WHERE user_id IN (:'ua', :'ub', :'u16');
-DELETE FROM user_profile      WHERE user_id IN (:'ua', :'ub', :'u16');
+DELETE FROM ability_history WHERE user_id IN (current_setting('r9.ua'), current_setting('r9.ub'), current_setting('r9.u16'));
+DELETE FROM learning_record   WHERE user_id IN (current_setting('r9.ua'), current_setting('r9.ub'), current_setting('r9.u16'));
+DELETE FROM user_profile      WHERE user_id IN (current_setting('r9.ua'), current_setting('r9.ub'), current_setting('r9.u16'));
 
 -- ═══ END: all scenarios passed (any FAIL would have raised) ═══
-\echo 'R6 collision matrix: ALL PASS'
+SELECT 'R6 collision matrix: ALL PASS' AS result;

@@ -26,14 +26,16 @@
 -- AND (unlike the destructive 004 suite) on production as a post-deploy check.
 -- ═══════════════════════════════
 --
--- Run AFTER migrations 001..005. psql script:
---   psql "$DATABASE_URL" -f supabase/tests/005_profile_integrity.sql
--- A clean run prints 11 PASS NOTICE lines then `R7 profile integrity: ALL PASS`
--- and exits 0. Any uncaught FAIL aborts with a non-zero exit
--- (`\set ON_ERROR_STOP on`).
+-- Run AFTER migrations 001..005, directly in the Supabase Dashboard SQL Editor
+-- (no psql meta-commands). Paste the whole script and Run.
+-- A clean run prints 11 PASS NOTICE lines then a final result row
+-- `R7 profile integrity: ALL PASS`. Any uncaught FAIL raises an exception and
+-- stops the script before that final row — never a false green.
 -- ============================================================
 
-\set ON_ERROR_STOP on
+-- Fail-fast: any FAIL raises inside its DO block and errors that statement; the
+-- SQL Editor stops at the first errored statement, so it never reaches the final
+-- "ALL PASS" row. (psql's \set ON_ERROR_STOP has no SQL Editor equivalent.)
 
 -- ═══ T1: user_profile RLS enabled + owner-bound SELECT/INSERT/UPDATE policies ═══
 DO $$
@@ -231,4 +233,4 @@ BEGIN
 END $$;
 
 -- ═══ END: all assertions passed (any FAIL would have raised and aborted) ═══
-\echo 'R7 profile integrity: ALL PASS'
+SELECT 'R7 profile integrity: ALL PASS' AS result;
