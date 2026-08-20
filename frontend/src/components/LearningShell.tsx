@@ -1,12 +1,20 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import type { LearningCard, CardType } from '../types';
+import type {
+  LearningCard,
+  CardType,
+  ChoiceCardData,
+  ReorderCardData,
+  ReadingBreakdownCardData,
+} from '../types';
 import { getNextCard, getTotalCards } from '../data/mock';
 import { applyLearningEvidence } from '../lib/db';
 import { executeSave } from '../lib/saveExecutor';
+import { buildRuleFeedback, type CardAnswer, type RuleFeedback } from '../lib/feedback';
 import ChoiceCard from './cards/ChoiceCard';
 import ReadingBreakdownCard from './cards/ReadingBreakdownCard';
 import ReorderCard from './cards/ReorderCard';
+import FeedbackPanel from './FeedbackPanel';
 import SessionTimer from './SessionTimer';
 
 interface Props {
@@ -21,6 +29,10 @@ type PersistPayload = {
   userAnswer?: unknown;
 };
 
+// 训练闭环状态机：answering → (correct | hint) → [retry] → (correct | explained) → 保存并继续。
+// 首次错误只给提示不揭示答案；二次仍错揭示完整解析；每张原始卡片最多写一次证据。
+type FlowPhase = 'answering' | 'correct' | 'hint' | 'explained';
+
 export default function LearningShell({ onComplete, sessionId }: Props) {
   const [currentCard, setCurrentCard] = useState<LearningCard | null>(null);
   const [cardKey, setCardKey] = useState(0);
@@ -29,8 +41,12 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
   const [totalCards] = useState(() => getTotalCards());
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  const [phase, setPhase] = useState<FlowPhase>('answering');
+  const [attemptIndex, setAttemptIndex] = useState(1);
+  const [feedback, setFeedback] = useState<RuleFeedback | null>(null);
   const savingRef = useRef(false);
   const pendingRef = useRef<{ payload: PersistPayload; advanceFn: () => void } | null>(null);
+  const lastAnswerRef = useRef<CardAnswer | null>(null);
 
   const advance = useCallback(() => {
     const next = getNextCard();
@@ -100,32 +116,65 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
     saveAndAdvance(pending.payload, pending.advanceFn);
   }, [saveAndAdvance]);
 
+  // 前端闭环核心：判题只用本地答案与正确答案的差异，不写库、不落 attempts。
+  const handleAnswer = useCallback(
+    (answer: CardAnswer) => {
+      const fb = buildRuleFeedback(answer, attemptIndex);
+      lastAnswerRef.current = answer;
+      setFeedback(fb);
+      if (fb.correct) setPhase('correct');
+      else if (attemptIndex === 1) setPhase('hint');
+      else setPhase('explained');
+    },
+    [attemptIndex],
+  );
+
   const handleChoice = useCallback(
     (optionId: string) => {
-      const card = currentCard as any;
-      const isCorrect =
-        card.correctOptionId && card.correctOptionId !== ''
-          ? optionId === card.correctOptionId
-          : null; // preference cards: null
-
-      saveAndAdvance(
-        {
-          cardType: 'choice',
-          cardId: card.cardId,
-          correct: isCorrect,
-          userAnswer: { selectedOptionId: optionId },
-        },
-        () => {
-          setCardsDone((n) => n + 1);
-          advance();
-        },
-      );
+      const card = currentCard as ChoiceCardData;
+      const hasCorrect = card.correctOptionId && card.correctOptionId !== '';
+      if (!hasCorrect) {
+        // 偏好卡（welcome/goal）：无正误判断，直接保存并跳题，不进反馈闭环。
+        saveAndAdvance(
+          {
+            cardType: 'choice',
+            cardId: card.cardId,
+            correct: null,
+            userAnswer: { selectedOptionId: optionId },
+          },
+          () => {
+            setCardsDone((n) => n + 1);
+            advance();
+          },
+        );
+        return;
+      }
+      handleAnswer({
+        cardType: 'choice',
+        selectedOptionId: optionId,
+        correctOptionId: card.correctOptionId,
+        options: card.options,
+        presentationVariant: card.presentationVariant ?? 'standard',
+      });
     },
-    [currentCard, saveAndAdvance, advance],
+    [currentCard, saveAndAdvance, advance, handleAnswer],
+  );
+
+  const handleReorderSubmit = useCallback(
+    (orderedIds: string[]) => {
+      const card = currentCard as ReorderCardData;
+      handleAnswer({
+        cardType: 'reorder',
+        orderedChunkIds: orderedIds,
+        correctOrder: card.correctOrder,
+        chunks: card.chunks,
+      });
+    },
+    [currentCard, handleAnswer],
   );
 
   const handleBreakdownComplete = useCallback(() => {
-    const card = currentCard as any;
+    const card = currentCard as LearningCard;
     // ReadingBreakdown: no correctness, just log
     saveAndAdvance(
       { cardType: 'reading_breakdown', cardId: card.cardId, correct: null, userAnswer: null },
@@ -136,29 +185,47 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
     );
   }, [currentCard, saveAndAdvance, advance]);
 
-  const handleReorderSubmit = useCallback(
-    (orderedIds: string[]) => {
-      const card = currentCard as any;
-      const isCorrect =
-        orderedIds.length === card.correctOrder.length &&
-        orderedIds.every((id: string, i: number) => id === card.correctOrder[i]);
+  // 首次错误后同题重试：保持卡片挂载（Reorder 保留用户排列可编辑），仅解锁并重置判题。
+  const handleRetry = useCallback(() => {
+    setAttemptIndex(2);
+    setFeedback(null);
+    setPhase('answering');
+  }, []);
 
-      saveAndAdvance(
-        {
-          cardType: 'reorder',
-          cardId: card.cardId,
-          correct: isCorrect,
-          userAnswer: { orderedChunkIds: orderedIds },
-        },
-        () => {
-          setCardsDone((n) => n + 1);
-          // Wait so user sees result, then advance
-          setTimeout(() => advance(), 2000);
-        },
-      );
-    },
-    [currentCard, saveAndAdvance, advance],
-  );
+  // 进入下一题前重置闭环状态（当前卡已保存，流状态回到初始）。
+  const resetFlow = useCallback(() => {
+    setPhase('answering');
+    setAttemptIndex(1);
+    setFeedback(null);
+    lastAnswerRef.current = null;
+  }, []);
+
+  // 「继续」：正确或揭示后，才做唯一一次证据写入；保存成功才进入下一题。
+  const handleContinue = useCallback(() => {
+    const card = currentCard as LearningCard;
+    const fb = feedback;
+    const answer = lastAnswerRef.current;
+    if (!fb || !answer) return;
+
+    const userAnswer =
+      answer.cardType === 'choice'
+        ? { selectedOptionId: answer.selectedOptionId }
+        : { orderedChunkIds: answer.orderedChunkIds };
+
+    saveAndAdvance(
+      {
+        cardType: answer.cardType,
+        cardId: card.cardId,
+        correct: fb.correct,
+        userAnswer,
+      },
+      () => {
+        setCardsDone((n) => n + 1);
+        resetFlow();
+        advance();
+      },
+    );
+  }, [currentCard, feedback, saveAndAdvance, advance, resetFlow]);
 
   if (!currentCard) {
     return (
@@ -168,21 +235,29 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
     );
   }
 
+  const locked = phase !== 'answering';
+
+  // 情景化词块教学（原句含义 / 搭配 / 记忆钩子）只在答题定局后随反馈展示，
+  // 首次错误的提示阶段不泄露答案。
+  const teaching =
+    'teaching' in currentCard ? currentCard.teaching : undefined;
+
   const renderCard = () => {
     switch (currentCard.cardType) {
       case 'choice' as CardType:
         return (
           <ChoiceCard
             key={cardKey}
-            data={currentCard as any}
+            data={currentCard as ChoiceCardData}
             onChoice={handleChoice}
+            locked={locked}
           />
         );
       case 'reading_breakdown' as CardType:
         return (
           <ReadingBreakdownCard
             key={cardKey}
-            data={currentCard as any}
+            data={currentCard as ReadingBreakdownCardData}
             onComplete={handleBreakdownComplete}
           />
         );
@@ -190,8 +265,9 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
         return (
           <ReorderCard
             key={cardKey}
-            data={currentCard as any}
+            data={currentCard as ReorderCardData}
             onSubmit={handleReorderSubmit}
+            locked={locked}
           />
         );
       default:
@@ -219,6 +295,18 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
 
       <div className="learning-shell__card-area">
         <AnimatePresence mode="wait">{renderCard()}</AnimatePresence>
+
+        {feedback && phase !== 'answering' && (
+          <FeedbackPanel
+            feedback={feedback}
+            teaching={teaching}
+            saving={saving}
+            onRetry={phase === 'hint' ? handleRetry : undefined}
+            onContinue={
+              phase === 'correct' || phase === 'explained' ? handleContinue : undefined
+            }
+          />
+        )}
       </div>
     </div>
   );

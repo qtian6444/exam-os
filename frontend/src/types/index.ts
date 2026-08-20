@@ -21,6 +21,19 @@ export interface ChoiceOption {
   text: string;
 }
 
+export type ChoicePresentationVariant =
+  | 'standard'
+  | 'dialogue'
+  | 'cloze'
+  | 'reading'
+  | 'translation';
+
+export interface CardTeaching {
+  meaning: string;
+  collocation: string;
+  hook: string;
+}
+
 export interface ChoiceCardData {
   cardId: string;
   cardType: CardType.CHOICE;
@@ -28,6 +41,10 @@ export interface ChoiceCardData {
   sentence: string;
   options: ChoiceOption[];
   correctOptionId: string;
+  presentationVariant?: ChoicePresentationVariant;
+  prompt?: string;
+  source?: string;
+  teaching?: CardTeaching;
 }
 
 // ── Reading Breakdown Card ──
@@ -73,6 +90,8 @@ export interface ReorderCardData {
   cardType: CardType.REORDER;
   chunks: ChunkItem[];
   correctOrder: string[]; // ordered chunk IDs
+  source?: string;
+  teaching?: CardTeaching;
 }
 
 // ── Unified Card ──

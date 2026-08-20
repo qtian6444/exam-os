@@ -81,7 +81,9 @@ export default function AccountLoginView({
     <div className="account-login">
       <header className="account-login__header">
         <h1 className="account-login__title">Exam OS</h1>
-        <p className="account-login__subtitle">登录并继续你的学习状态</p>
+        <p className="account-login__subtitle">
+          登录并继续积累你的长期学习记忆
+        </p>
       </header>
 
       <form className="account-login__form" onSubmit={handleSubmit} noValidate>
@@ -182,7 +184,7 @@ export default function AccountLoginView({
           onClick={onGuestTry}
           disabled={isBusy}
         >
-          继续游客体验
+          先以游客身份体验
         </button>
       )}
     </div>

@@ -83,7 +83,9 @@ describe('AccountLoginView', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '继续游客体验' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: '先以游客身份体验' }),
+    );
     expect(onGuestTry).toHaveBeenCalledTimes(1);
   });
 });

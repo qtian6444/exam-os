@@ -1,722 +1,143 @@
 # Exam OS Current Stage
 
-Stage ID: P0-SECURITY-01
-Stage Name: Security Boundary Hardening
+Stage ID: P0-LEARNING-INTERACTION-01
+Stage Name: 训练交互纠偏（解析型页面 → 训练型页面）
 Status: ACTIVE
 Priority: P0
 
+---
+
+## 0. 前任 Stage 最终状态记录（P0-SECURITY-01）
+
+> 以下为 P0-SECURITY-01「安全边界加固」的最终状态，依据仓库真实验收证据记录，
+> 不伪造 COMPLETE / ACCEPTED。
+
+- 最终状态：`IMPLEMENTATION_COMPLETE`（R4），**未 STAGE_ACCEPTED**。
+- 判定依据：`docs/stages/REVIEW_HANDOFF.md`（R4 待 Codex 双审）。
+- 真实未验证项（不得当作已完成）：
+  - migration `004_atomic_learning_evidence.sql` 线上部署：**BLOCKED**（需 Product Owner 在 Supabase SQL Editor 执行）。
+  - RPC `apply_learning_evidence` 线上 DB 集成验证：**NOT_RUN**。
+  - breakdown 并发 single-flight 线上验证：**NOT_RUN**（需重新部署 breakdown 函数）。
+  - `dedup_test.ts` Deno 测试：**NOT_RUN**。
+- 已通过证据：typecheck / lint / build / vitest（47/47）/ 线上 RLS 双用户隔离与未认证拦截脚本断言 PASS。
+- 遗留 debt（KEEP，不阻断本 Stage）：`LEGACY_UNOWNED_DATA`、匿名防滥用 CAPTCHA。
+- 约束：本 Stage **不得删除、回滚、混入** P0-SECURITY-01 的任何代码修改（迁移、RLS、Auth、Edge Function、RPC）。
+
+---
+
 ## 1. 本 Stage 唯一目标
 
-只解决两个已经由 Product Owner 锁定的安全阻断问题：
+将当前「解析型页面」（用户被动看拆解、看题）改造成「用户必须主动操作的训练型页面」。
 
-### P0-SECURITY-01
-DeepSeek API Key 当前存在进入浏览器前端的风险。
+每条训练题必须满足：
 
-目标：
+```
+用户先做至少一个主动动作（选 / 排 / 判 / 组）
+→ 即时反馈（对错 + 局部原因 + 下一步）
+→ 展示作答证据 / 正确解析
+→ 继续下一题
+```
 
-任何真实 DeepSeek API Secret 都不得：
-- 出现在 VITE_ 前端环境变量
-- 进入浏览器 bundle
-- 出现在浏览器源码
-- 出现在浏览器 Network 请求 Authorization 中
-- 出现在前端日志
-- 出现在 Git
-- 出现在 REVIEW_HANDOFF
-- 出现在任何用户可读取 artifact
-
-DeepSeek API 调用必须迁移到服务端安全边界。
-
-优先使用现有 Supabase Edge Functions 架构。
-
-如果现有 Edge Function 已经存在合适 owner：
-复用现有 owner。
-
-如果没有：
-只创建实现该安全边界所必需的最小 Edge Function。
-
-DeepSeek Secret 使用 Supabase 服务端 Secret / Edge Function 环境变量读取。
-
-前端只能请求我们自己的服务端函数。
-
-前端不得直接携带 DeepSeek Secret 调用 DeepSeek API。
+ReadingBreakdown 从「默认主流程」退为「支架状态」（对齐 C06），不再作为默认解析页。
 
 ---
 
-### P0-SECURITY-02
-Supabase 当前匿名 FOR ALL USING(true) / WITH CHECK(true) RLS 必须删除。
+## 2. 参考边界
 
-目标：
+### Duolingo 只参考
 
-任何用户都不能读取、修改或伪造其他用户的核心学习数据。
+- 单动作任务
+- 用户主动操作
+- 即时反馈
+- 题型丰富性
+- 低难度逐步提升
+- 移动端训练节奏
 
-正式用户数据权限身份不得继续依赖客户端自己生成并提交的 device UUID。
+### 听劫只参考
 
-使用 Supabase Auth Anonymous Sign-In 建立免登录用户身份。
+- 专业训练空间
+- 听前预判
+- 作答后展示证据
+- 信息层级
+- 训练过程呈现
 
-产品体验仍然保持：
+### 不得照搬
 
-打开 Exam OS
-→ 无需邮箱
-→ 无需密码
-→ 无需手机号
-→ 无需人工登录
-→ 自动建立匿名 Auth Session
-→ 正常进入学习
-
-Anonymous Auth 的 auth.uid() 作为真正的数据所有权身份。
-
-device UUID 如果当前代码仍有其他用途，可以暂时保留用于：
-- device metadata
-- debugging
-- analytics
-
-但：
-
-device UUID 不得再作为数据库授权身份。
+- 两个产品的品牌视觉
+- 角色
+- 商业机制
+- 完整产品结构
 
 ---
 
-## 2. 本 Stage 明确不做什么
+## 3. 允许修改
 
-禁止夹带：
-
-- Onboarding V2
-- FIRST_SESSION V2
-- Learning Game Shell
-- Audio Capability
-- AudioCard
-- Vocabulary Context
-- Reading Support
-- ReadingBreakdown产品流程改造
-- Reorder两次尝试
-- Agent V0
-- content_library正式内容迁移
-- UI重设计
-- Partner重设计
-- 目录大清理
-- archive清理
-- CI体系重构
-- 性能优化
-- 其他产品功能
-
-除非某个极小修改是完成本 Stage 安全目标不可避免的依赖。
-
-如果发现其他问题：
-
-只记录：
-
-NON_BLOCKING_SUGGESTION
-
-不要实施。
+- ReadingBreakdown 默认流程
+- Reorder 题型交互与默认难度
+- Choice 题型呈现
+- 默认训练题队列
+- 训练页面前端展示
+- 对应前端测试和必要样式
 
 ---
 
-## 3. DeepSeek API 安全边界
+## 4. 禁止修改
 
-开始前先审计当前真实调用链：
+- 数据库结构
+- `db.ts`
+- `saveExecutor.ts`
+- RPC
+- RLS
+- migrations
+- Auth
+- 能力模型
+- 学习证据保存协议
+- DeepSeek 服务端安全边界
 
-frontend
-→ DeepSeek调用代码
-→ 当前API
-→ 当前Edge Functions
-
-确认当前真实风险后再改。
-
-最终必须达到：
-
-Frontend
-↓
-Supabase Edge Function
-↓
-服务器端读取 DeepSeek Secret
-↓
-DeepSeek API
-↓
-Edge Function验证/规范化响应
-↓
-Frontend
-
-禁止：
-
-Frontend
-↓
-DeepSeek API
+> 以上禁止项即 R9 冻结层 + 学习证据协议 + DeepSeek 服务端边界。
+> 若开发中确需触碰上述任一冻结项，立即停止并输出 `SPEC_CONFLICT`，不自行绕过。
 
 ---
 
-## 4. DeepSeek Secret 规则
+## 5. 验收标准（Definition of Done）
 
-代码中不得出现真实 Secret。
+只有以下全部满足，Implementation Agent 才能输出 `IMPLEMENTATION_COMPLETE`：
 
-不得把真实 Secret：
+### 交互目标
 
-- 写进源码
-- 写进 .env.example
-- 写进 commit
-- 写进文档
-- 写进 console
-- 写进 error response
-- 写进日志
-- 回传浏览器
+- 默认训练流程为「用户主动操作型」：每题要求至少一个主动动作后才能推进；ReadingBreakdown 不再作为默认主流程（退为支架，C06）。
+- 作答后即时反馈：对错 + 局部原因 + 下一步，来源为「用户答案 vs 正确答案的真实差异 + 题型规则 + 五维能力映射」，不虚构、不空洞（C16）。
+- 错误不形成通关墙（C11）：首次错误可重试；达到当前规则最大尝试后揭示答案并允许继续。
+- 移动端一题一个主要动作，低摩擦（C15）。
+- 强化/验证无安全可用同类型题时，走 `PENDING_VALIDATION` 兜底并允许继续，不随机凑题。
 
-.env.example 只能包含变量名，例如：
+### 冻结层与协议
 
-DEEPSEEK_API_KEY=
+- `db.ts` / `saveExecutor.ts` / RPC / RLS / migrations / Auth / 能力模型 / 学习证据保存协议 / DeepSeek 服务端边界 **无 diff**。
+- 最终学习证据仍走现有 `applyLearningEvidence` 链路，`p_user_answer` 数据结构不变，不新增持久化字段、不改 JSON 协议。
+- 每张原始卡片最多写一次证据；重试 / 提示过程只存前端状态，不单独落库。
 
-不得填写真实值。
+### 边界合规
 
-如果审计确认当前真实 DeepSeek API Key 曾经通过：
+- 不引入 Duolingo / 听劫 的品牌视觉、角色、商业机制、完整产品结构（只取交互原则）。
+- 不引入真实 LLM / 新 API 依赖；反馈仍为规则 + 差异驱动，不虚构 AI 分析。
 
-VITE_DEEPSEEK_API_KEY
+### 验证
 
-或其他前端方式加载进入浏览器：
-
-则必须把这个 Key 视为已经暴露。
-
-旧 Key 不能继续作为最终生产 Key。
-
-如果 Key rotation 需要 Product Owner 在 DeepSeek 控制台执行：
-
-输出：
-
-OWNER_ACTION_REQUIRED
-
-只告诉 Product Owner：
-需要在哪个页面重新生成 / rotate Key。
-
-禁止要求 Product Owner 把真实 Key 发到聊天中。
-
-新 Key 应直接进入 Supabase Secret 管理。
+- typecheck 通过
+- lint 通过
+- build 通过
+- 现有 tests 通过
+- 新增针对交互的前端测试通过（Choice 提交 / Reorder 判题 / 反馈面板 / 重试与揭示流程）
 
 ---
 
-## 5. Anonymous Auth
+## 6. Git 与交卷
 
-Exam OS 当前仍然保持免登录体验。
+完成开发与测试后：
 
-首次打开应用：
+1. 确认 git diff 只包含本 Stage 授权范围（`frontend/src/components/**`、`frontend/src/features/**`、`frontend/src/lib/feedback*`、`frontend/src/data/mock.ts`、必要样式与测试），不含任何冻结层文件。
+2. 填写 `docs/stages/REVIEW_HANDOFF.md`（或按协议输出交接）。
+3. 返回 `IMPLEMENTATION_COMPLETE` + 修改文件清单 + typecheck/lint/build/test 结果 + 冻结层无 diff 证据。
 
-如果已有有效 Supabase Auth Session：
-复用。
-
-如果没有：
-自动执行 Anonymous Sign-In。
-
-成功后获得：
-
-auth.uid()
-
-这个 UID 成为用户数据真正 owner。
-
-失败时：
-
-不得退回不安全的公开数据库写入。
-
-禁止：
-
-“Auth失败 → 为了让产品继续跑 → 临时关闭RLS / 使用公开写入”。
-
-失败必须进入明确 error / retry 状态。
-
-不得 silent failure。
-
----
-
-## 6. 数据所有权
-
-继续保持当前 5 张核心表。
-
-不得增加第 6 张核心表。
-
-当前 5 表：
-
-1. user_profile
-2. content_library
-3. content_skill
-4. learning_record
-5. ability_history
-
-先审计当前真实字段。
-
-不要凭记忆假设 user_id / profile_id 的名字。
-
-如果现有字段能够可靠绑定 auth.uid()：
-复用。
-
-如果用户数据表缺少真正的 Auth Owner 字段：
-
-允许通过最小 migration 增加必要 ownership 字段。
-
-禁止借此重新设计整个 schema。
-
----
-
-## 7. RLS 最终权限目标
-
-### user_profile
-
-用户只能：
-
-SELECT 自己
-INSERT 自己
-UPDATE 自己
-
-不得读取或修改其他用户 profile。
-
-客户端不需要的 DELETE 权限不要开放。
-
----
-
-### learning_record
-
-学习记录原则上是用户自己的 append-oriented 数据。
-
-客户端只开放当前真实产品链路需要的最小权限。
-
-至少必须保证：
-
-用户只能读取自己的 learning_record。
-用户只能创建属于自己的 learning_record。
-
-不得通过修改请求中的 user_id / profile_id 写入别人名下。
-
-如果当前产品不需要 UPDATE / DELETE：
-不要开放。
-
----
-
-### ability_history
-
-用户只能读取自己的 ability_history。
-用户只能创建属于自己的 ability_history。
-
-如果当前产品不需要 UPDATE / DELETE：
-不要开放。
-
----
-
-### content_library
-
-这是共享学习内容。
-
-普通学习用户：
-
-允许读取正式可用内容。
-
-不得从浏览器直接：
-INSERT
-UPDATE
-DELETE
-
----
-
-### content_skill
-
-这是共享内容能力标签。
-
-普通学习用户：
-
-允许读取。
-
-不得从浏览器直接：
-INSERT
-UPDATE
-DELETE
-
----
-
-## 8. 禁止继续使用宽松策略
-
-最终 migration 中不得继续存在以下核心用户数据策略：
-
-FOR ALL
-USING (true)
-WITH CHECK (true)
-
-不得用：
-
-“先留着方便测试”
-
-作为理由保留。
-
-也不得新增另一条 permissive policy 把安全限制重新绕开。
-
-必须检查旧 policy 是否真正删除。
-
----
-
-## 9. Edge Function 数据权限
-
-Edge Function 不得因为运行在服务器端就自动绕过用户数据隔离。
-
-对于用户自己的：
-
-user_profile
-learning_record
-ability_history
-
-优先使用：
-
-用户 JWT
-+
-RLS
-
-验证 ownership。
-
-如果某个 Edge Function 确实需要 elevated secret/service权限：
-
-必须说明为什么需要。
-
-并且必须在服务端根据已经验证的用户身份重新检查 ownership。
-
-不得相信客户端传来的：
-
-user_id
-profile_id
-device_id
-
-就直接用高权限写数据库。
-
----
-
-## 10. 旧数据
-
-当前数据库已有真实 E2E 测试记录。
-
-本 Stage：
-
-不得为了方便直接删除旧数据。
-
-如果新增 auth ownership 后旧记录无法自动对应新的 auth.uid()：
-
-保留旧记录。
-
-让旧的无 owner 测试数据默认不可被普通用户读取。
-
-在 REVIEW_HANDOFF 中说明：
-
-LEGACY_UNOWNED_DATA
-
-不要擅自删除或伪造 ownership。
-
----
-
-## 11. 必须测试两个独立用户
-
-本 Stage 不能只测试：
-
-“我自己还能不能写数据”。
-
-必须真实创建两个独立 Anonymous Auth Session：
-
-USER_A
-USER_B
-
-验证：
-
-USER_A：
-可以创建自己的 profile / learning record / ability history。
-
-USER_A：
-可以读取自己的数据。
-
-USER_B：
-可以创建自己的数据。
-
-USER_B：
-可以读取自己的数据。
-
-然后必须尝试：
-
-USER_A 读取 USER_B 数据
-→ 必须失败 / 返回空
-
-USER_A 修改 USER_B 数据
-→ 必须失败
-
-USER_A 伪造 USER_B owner id 创建记录
-→ 必须失败
-
-USER_B 对 USER_A 做同样测试
-→ 必须失败
-
-未登录请求访问用户核心数据
-→ 必须失败
-
-这是本 Stage Blocking Acceptance Test。
-
----
-
-## 12. Content 权限测试
-
-Authenticated Anonymous User：
-
-读取 content_library
-→ 应按设计成功
-
-读取 content_skill
-→ 应按设计成功
-
-浏览器直接尝试修改 content_library
-→ 必须失败
-
-浏览器直接尝试修改 content_skill
-→ 必须失败
-
----
-
-## 13. DeepSeek Key 验证
-
-必须真实检查：
-
-frontend source
-browser bundle
-browser Network
-browser console
-git diff
-git tracked files
-
-确认：
-
-不存在真实 DeepSeek API Secret。
-
-浏览器调用学习AI能力时：
-
-只能看到请求我们的服务端 Edge Function。
-
-不得看到：
-
-Authorization: Bearer <DEEPSEEK_SECRET>
-
-发往 DeepSeek API。
-
----
-
-## 14. DeepSeek功能回归
-
-安全迁移后必须确认现有需要 DeepSeek 的能力仍然可以真实工作。
-
-至少验证当前已经存在的：
-
-ReadingBreakdown / getBreakdown 对应真实链路
-
-能够：
-
-Frontend
-→ Edge Function
-→ DeepSeek
-→ 返回合法结果
-→ 前端正常展示
-
-本 Stage只验证它还能工作。
-
-不要借机重做 ReadingBreakdown 产品流程。
-
----
-
-## 15. Auth UX 回归
-
-安全改造不得增加：
-
-登录页面
-邮箱输入
-手机号输入
-密码输入
-注册弹窗
-
-首次用户仍然应该：
-
-打开
-→ 自动获得匿名session
-→ 正常进入现有流程
-
-用户不需要理解：
-
-Supabase
-JWT
-Anonymous Auth
-RLS
-auth.uid()
-
-这些都是内部实现。
-
----
-
-## 16. 必须测试的失败状态
-
-至少测试：
-
-1. Anonymous Sign-In失败
-2. Session过期 / 无效
-3. Edge Function无法访问DeepSeek
-4. DeepSeek API超时
-5. DeepSeek返回错误
-6. Edge Function Secret不存在
-7. 数据库拒绝RLS写入
-8. 用户修改客户端owner id
-9. USER_A尝试读取USER_B
-10. USER_A尝试修改USER_B
-11. 页面refresh后session恢复
-12. 快速重复提交
-
-禁止 silent failure。
-
-禁止为了通过测试关闭安全控制。
-
----
-
-## 17. Migration规则
-
-所有RLS / schema调整必须：
-
-通过正式 Supabase migration 进入 repo。
-
-不得只在 Supabase Dashboard 手改完却不留下 migration。
-
-如果确实需要 Dashboard 操作：
-
-代码 / migration仍必须保持可复现真源。
-
-不得进行破坏性数据删除。
-
----
-
-## 18. Definition of Done
-
-只有以下全部完成，Implementation Agent 才能输出：
-
-IMPLEMENTATION_COMPLETE
-
-### Secret
-
-- 前端不再直接调用 DeepSeek API
-- 前端不再读取 DeepSeek Secret
-- VITE_DEEPSEEK_API_KEY 等真实Secret入口已移除
-- DeepSeek Secret只存在服务端安全环境
-- 浏览器bundle无Secret
-- Network无Secret
-- Git无Secret
-- 如果旧Key曾进入浏览器，已完成rotation或明确等待Owner完成rotation
-
-### Auth
-
-- 免登录Anonymous Auth正常工作
-- auth.uid()成为用户数据安全身份
-- device UUID不再承担授权职责
-
-### RLS
-
-- 删除用户核心数据的匿名全开放policy
-- USER_A / USER_B数据真正隔离
-- 未登录访问用户数据失败
-- 共享content可读
-- 普通客户端不能改共享content
-- 无额外 permissive policy 绕过规则
-
-### Regression
-
-- 当前应用可以启动
-- 当前核心流程没有因为安全改造完全中断
-- 现有DeepSeek能力通过服务端链路工作
-- refresh后session正常恢复
-
-### Verification
-
-- typecheck通过
-- lint通过
-- build通过
-- 当前已有tests通过
-- 新安全边界有针对性测试
-- 两用户RLS隔离真实验证通过
-
-### Documentation
-
-- 更新必要工程文档
-- 填写 docs/stages/REVIEW_HANDOFF.md
-- 所有事实有实际证据
-- 不写自我评价
-
----
-
-## 19. Git与交卷
-
-完成全部开发和测试后：
-
-1. 填写 REVIEW_HANDOFF.md
-2. 确认 git diff 只包含本 Security Stage
-3. commit
-4. push
-5. 冻结 HEAD
-
-然后返回：
-
-IMPLEMENTATION_COMPLETE
-
-并提供：
-
-Stage ID:
-P0-SECURITY-01
-
-Base commit:
-
-HEAD commit:
-
-Branch:
-
-DeepSeek Key migration:
-PASS / FAIL
-
-Key rotation:
-DONE / OWNER_ACTION_REQUIRED / NOT_REQUIRED
-
-Anonymous Auth:
-PASS / FAIL
-
-RLS isolation:
-PASS / FAIL
-
-USER_A → USER_B isolation:
-PASS / FAIL
-
-USER_B → USER_A isolation:
-PASS / FAIL
-
-Unauthenticated access:
-BLOCKED / NOT_BLOCKED
-
-Shared content read:
-PASS / FAIL
-
-Shared content client write:
-BLOCKED / NOT_BLOCKED
-
-DeepSeek server-side call:
-PASS / FAIL
-
-typecheck:
-PASS / FAIL
-
-lint:
-PASS / FAIL
-
-build:
-PASS / FAIL
-
-tests:
-PASS / FAIL
-
-Unverified:
-...
-
-Commit:
-...
-
-Push:
-SUCCESS / FAIL
-
-不要宣布：
-STAGE_ACCEPTED
-PRODUCT_PASS
-ENGINEERING_PASS
-
-等待外部 Codex 双审。
+不要宣布 `STAGE_ACCEPTED` / `PRODUCT_PASS` / `ENGINEERING_PASS`，等待外部 Codex 双审。

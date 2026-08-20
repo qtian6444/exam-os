@@ -18,65 +18,340 @@
   border-color: var(--accent);
 }
 
-.account-access__overlay {
+@media (max-width: 520px) {
+  .account-access__entry {
+    top: 12px;
+    right: 12px;
+  }
+}
+
+.account-access__experience {
   position: fixed;
   inset: 0;
   z-index: 100;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  min-height: 100dvh;
+  padding: 32px;
   overflow-y: auto;
-  background: rgba(0, 0, 0, 0.78);
-  backdrop-filter: blur(8px);
+  background:
+    radial-gradient(circle at 18% 18%, rgba(108, 92, 231, 0.2), transparent 38%),
+    radial-gradient(circle at 82% 76%, rgba(66, 153, 225, 0.12), transparent 34%),
+    var(--bg);
 }
 
-.account-access__dialog {
-  position: relative;
+.account-access__experience .account-access__dialog {
   width: 100%;
-  max-width: 420px;
-  padding: 24px;
-  background: var(--bg);
+  max-width: 920px;
+  padding: 44px;
+  background: rgba(24, 24, 28, 0.96);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  border-radius: calc(var(--radius) + 8px);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.48);
 }
 
-.account-access__close {
-  position: absolute;
-  top: 12px;
-  right: 14px;
-  z-index: 1;
-  width: 36px;
-  height: 36px;
-  font-family: var(--font);
-  font-size: 26px;
-  line-height: 1;
+.account-access__experience .account-access__dialog--login {
+  max-width: 760px;
+  padding: 28px 44px;
+}
+
+.account-access__experience .account-access__dialog--wechat {
+  max-width: 920px;
+}
+
+.account-access__tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: -44px -44px 38px;
+  border-bottom: 1px solid var(--border);
+}
+
+.account-access__dialog--login .account-access__tabs {
+  margin: -28px -44px 18px;
+}
+
+.account-access__tabs button {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  min-height: 92px;
+  padding: 20px;
   color: var(--text-dim);
+  text-align: left;
   background: transparent;
-  border: none;
-  border-radius: 50%;
+  border: 0;
+  border-right: 1px solid var(--border);
   cursor: pointer;
 }
 
-.account-access__close:hover {
-  color: var(--text);
-  background: var(--surface);
+.account-access__tabs button:last-child {
+  border-right: 0;
 }
 
-@media (max-width: 520px) {
-  .account-access__entry {
-    top: 12px;
-    right: 12px;
-  }
+.account-access__tabs button::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 3px;
+  background: transparent;
+}
 
-  .account-access__overlay {
+.account-access__tabs button:hover,
+.account-access__tabs button.is-active {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.account-access__tabs button.is-active::after {
+  background: var(--accent);
+}
+
+.account-access__tabs button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.account-access__tab-index {
+  grid-row: span 2;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.account-access__tab-title {
+  color: inherit;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.account-access__tab-copy {
+  font-size: 12px;
+}
+
+.account-access__welcome {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.8fr);
+  gap: 56px;
+  align-items: center;
+}
+
+.account-access__welcome-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.account-access__eyebrow {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.account-access__welcome h1 {
+  max-width: 620px;
+  color: #fff;
+  font-size: clamp(34px, 5vw, 58px);
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+}
+
+.account-access__promise {
+  color: #fff;
+  font-size: clamp(18px, 2.4vw, 24px);
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.account-access__description,
+.account-access__guest-note,
+.account-access__status p {
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+
+.account-access__description {
+  max-width: 660px;
+  font-size: 16px;
+}
+
+.account-access__memory-list {
+  display: grid;
+  gap: 11px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.account-access__memory-list li {
+  position: relative;
+  padding-left: 25px;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.account-access__memory-list li::before {
+  content: '';
+  position: absolute;
+  top: 0.45em;
+  left: 2px;
+  width: 9px;
+  height: 9px;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 5px rgba(108, 92, 231, 0.14);
+}
+
+.account-access__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 28px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.account-access__primary,
+.account-access__secondary,
+.account-access__guest-action,
+.account-access__entry {
+  font-family: var(--font);
+  cursor: pointer;
+}
+
+.account-access__primary,
+.account-access__secondary,
+.account-access__guest-action {
+  width: 100%;
+  padding: 16px 20px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: var(--radius);
+}
+
+.account-access__primary {
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.account-access__primary:hover {
+  background: #7c6ff7;
+}
+
+.account-access__secondary {
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+
+.account-access__secondary:hover {
+  border-color: var(--accent);
+}
+
+.account-access__guest-action {
+  padding: 12px 20px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 0;
+}
+
+.account-access__guest-action:hover {
+  color: var(--text);
+}
+
+.account-access__guest-note {
+  margin-top: 3px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.account-access__status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 40px 0;
+  text-align: center;
+}
+
+.account-access__status h1 {
+  color: #fff;
+  font-size: 28px;
+}
+
+.account-access__status-mark {
+  width: 30px;
+  height: 30px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: account-access-spin 0.85s linear infinite;
+}
+
+@keyframes account-access-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 760px) {
+  .account-access__experience {
     align-items: flex-start;
-    padding: 12px;
+    padding: 16px;
   }
 
-  .account-access__dialog {
-    margin-top: 12px;
+  .account-access__experience .account-access__dialog,
+  .account-access__experience .account-access__dialog--login {
+    margin: 12px 0;
+    padding: 28px 22px;
+  }
+
+  .account-access__tabs,
+  .account-access__dialog--login .account-access__tabs {
+    margin: -28px -22px 26px;
+  }
+
+  .account-access__tabs button {
+    min-height: 66px;
+    padding: 14px 8px;
+    text-align: center;
+  }
+
+  .account-access__tab-index,
+  .account-access__tab-copy {
+    display: none;
+  }
+
+  .account-access__tab-title {
+    align-self: center;
+    font-size: 13px;
+  }
+
+  .account-access__welcome {
+    grid-template-columns: 1fr;
+    gap: 30px;
+  }
+
+  .account-access__welcome h1 {
+    font-size: 38px;
+  }
+
+  .account-access__choices {
     padding: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .account-access__status-mark {
+    animation-duration: 1.8s;
   }
 }

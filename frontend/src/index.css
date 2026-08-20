@@ -889,3 +889,182 @@ body {
   color: var(--text-dim);
   line-height: 1.6;
 }
+
+/* ── Choice Card Submit ── */
+.choice-card__submit {
+  width: 100%;
+  padding: 16px;
+  font-size: 17px;
+  font-family: var(--font);
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.choice-card__submit:hover:not(:disabled) {
+  background: #7c6ff7;
+}
+
+.choice-card__submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Locked card states ── */
+.reorder-card--locked {
+  pointer-events: none;
+  opacity: 0.65;
+}
+
+/* ── Feedback Panel ── */
+.feedback-panel {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.feedback-panel__verdict {
+  padding: 14px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+}
+
+.feedback-panel__verdict--correct {
+  background: rgba(0, 184, 148, 0.15);
+  color: var(--success);
+  border: 1px solid var(--success);
+}
+
+.feedback-panel__verdict--wrong {
+  background: rgba(225, 112, 85, 0.15);
+  color: var(--error);
+  border: 1px solid var(--error);
+}
+
+.feedback-panel__block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.feedback-panel__block--answer {
+  padding: 12px 14px;
+  background: rgba(108, 92, 231, 0.1);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+
+.feedback-panel__label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+}
+
+.feedback-panel__text {
+  font-size: 15px;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.feedback-panel__btn {
+  width: 100%;
+  padding: 15px;
+  font-size: 16px;
+  font-family: var(--font);
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.feedback-panel__btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.feedback-panel__btn--primary {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+}
+
+.feedback-panel__btn--primary:hover:not(:disabled) {
+  background: #7c6ff7;
+}
+
+.feedback-panel__btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.feedback-panel__teaching {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: rgba(108, 92, 231, 0.08);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-sm);
+}
+
+.feedback-panel__teaching-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.feedback-panel__teaching-tag {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* ── Choice Card presentation variants ── */
+.choice-card__variant {
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  background: rgba(108, 92, 231, 0.12);
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+
+.choice-card__prompt {
+  font-size: 17px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.choice-card__sentence--translation {
+  font-size: 20px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.choice-card__sentence--dialogue {
+  font-style: italic;
+  color: #cfd8ff;
+}
+
+.choice-card__sentence--reading {
+  font-size: 15px;
+  line-height: 1.7;
+}

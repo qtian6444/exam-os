@@ -7,3 +7,17 @@ dist/
 npm-debug.log*
 .DS_Store
 *.pem
+
+# Raw exam material / personal assets / local temp — never publish
+*.pdf
+*.docx
+*.jpg
+*.jpeg
+*.png
+*.gif
+kimi-vision.js
+/data/
+
+# Accidental root npm artifacts (the real app lives in frontend/)
+/package.json
+/package-lock.json

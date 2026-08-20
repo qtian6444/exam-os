@@ -12,7 +12,9 @@ import AccountAccess from './AccountAccess';
 afterEach(cleanup);
 
 async function openLogin() {
-  const entry = await screen.findByRole('button', { name: '账号登录' });
+  const entry = await screen.findByRole('button', {
+    name: '登录永久账号',
+  });
   fireEvent.click(entry);
 }
 
@@ -26,21 +28,80 @@ function fillValidForm() {
 }
 
 describe('AccountAccess', () => {
-  it('shows the account entry only for user.is_anonymous identities', async () => {
-    const anonymousView = render(
-      <AccountAccess readIdentity={async () => 'ANONYMOUS'} />,
+  it('shows the welcome value before rendering Learning OS for anonymous users', async () => {
+    render(
+      <AccountAccess readIdentity={async () => 'ANONYMOUS'}>
+        <div>Learning OS content</div>
+      </AccountAccess>,
     );
+
     expect(
-      await screen.findByRole('button', { name: '账号登录' }),
+      await screen.findByText('登录后，AI会持续理解你的英语学习状态。'),
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: '游客体验' })).toBeTruthy();
+    expect(screen.queryByText('Learning OS content')).toBeNull();
+  });
+
+  it('renders Learning OS immediately for a permanent identity', async () => {
+    render(
+      <AccountAccess readIdentity={async () => 'PERMANENT'}>
+        <div>Learning OS content</div>
+      </AccountAccess>,
+    );
+
+    expect(await screen.findByText('Learning OS content')).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('enters the complete guest experience and keeps login available', async () => {
+    render(
+      <AccountAccess readIdentity={async () => 'ANONYMOUS'}>
+        <div>Learning OS content</div>
+      </AccountAccess>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '游客体验' }));
+
+    expect(screen.getByText('Learning OS content')).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: '登录 / 开通永久账号' }),
     ).toBeTruthy();
 
-    anonymousView.unmount();
-    render(<AccountAccess readIdentity={async () => 'PERMANENT'} />);
-    await waitFor(() =>
-      expect(
-        screen.queryByRole('button', { name: '账号登录' }),
-      ).toBeNull(),
+    fireEvent.click(
+      screen.getByRole('button', { name: '登录 / 开通永久账号' }),
     );
+    expect(screen.getByRole('dialog', { name: '账号登录' })).toBeTruthy();
+    expect(screen.getByText('Learning OS content')).toBeTruthy();
+  });
+
+  it('switches between product value, WeChat activation, and account login', async () => {
+    render(
+      <AccountAccess readIdentity={async () => 'ANONYMOUS'}>
+        <div>Learning OS content</div>
+      </AccountAccess>,
+    );
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: '还没有账号？微信人工开通',
+      }),
+    );
+
+    expect(
+      screen.getByRole('dialog', { name: '微信人工开通' }),
+    ).toBeTruthy();
+    expect(screen.getByText('微信人工开通永久账号')).toBeTruthy();
+    expect(
+      screen.getByRole('img', { name: '添加微信睡个好觉的二维码' }),
+    ).toBeTruthy();
+    expect(screen.queryByText('Learning OS content')).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '我已有账号，返回登录' }),
+    );
+
+    expect(screen.getByRole('dialog', { name: '账号登录' })).toBeTruthy();
+    expect(screen.getByLabelText('手机号')).toBeTruthy();
   });
 
   it('reloads only after Supabase login succeeds', async () => {
@@ -92,53 +153,49 @@ describe('AccountAccess', () => {
     expect(screen.getByRole('dialog', { name: '账号登录' })).toBeTruthy();
   });
 
-  it('invalidates a delayed login when the dialog closes', async () => {
-    let resolveLogin!: (result: {
-      result: 'SUCCESS';
-      session: { access_token: string; refresh_token: string };
-    }) => void;
-    const login = vi.fn(
-      () =>
-        new Promise<{
-          result: 'SUCCESS';
-          session: { access_token: string; refresh_token: string };
-        }>((resolve) => {
-          resolveLogin = resolve;
-        }),
-    );
-    const activateSession = vi.fn(async () => 'SUCCESS' as const);
-    const reloadPage = vi.fn();
-    render(
-      <AccountAccess
-        readIdentity={async () => 'ANONYMOUS'}
-        login={login}
-        activateSession={activateSession}
-        reloadPage={reloadPage}
-      />,
-    );
-    await openLogin();
-    fillValidForm();
-
-    fireEvent.click(screen.getByRole('button', { name: '登录' }));
-    await waitFor(() => expect(login).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('button', { name: '关闭账号登录' }));
-    resolveLogin({
-      result: 'SUCCESS',
-      session: { access_token: 'late-jwt', refresh_token: 'late-refresh' },
+  it('blocks Learning OS on identity read failure and supports retry', async () => {
+    let attempt = 0;
+    const readIdentity = vi.fn(async () => {
+      attempt += 1;
+      if (attempt === 1) throw new Error('network');
+      return 'ANONYMOUS' as const;
     });
 
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(activateSession).not.toHaveBeenCalled();
-    expect(reloadPage).not.toHaveBeenCalled();
+    render(
+      <AccountAccess
+        readIdentity={readIdentity}
+      >
+        <div>Learning OS content</div>
+      </AccountAccess>,
+    );
+
+    expect(await screen.findByText('暂时无法读取账号状态')).toBeTruthy();
+    expect(screen.queryByText('Learning OS content')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '重新读取' }));
+
+    expect(
+      await screen.findByText('登录后，AI会持续理解你的英语学习状态。'),
+    ).toBeTruthy();
+    expect(readIdentity).toHaveBeenCalledTimes(2);
   });
 
-  it('returns to the existing guest experience without changing identity', async () => {
-    render(<AccountAccess readIdentity={async () => 'ANONYMOUS'} />);
+  it('returns to guest experience from login without changing identity', async () => {
+    render(
+      <AccountAccess readIdentity={async () => 'ANONYMOUS'}>
+        <div>Learning OS content</div>
+      </AccountAccess>,
+    );
     await openLogin();
 
-    fireEvent.click(screen.getByRole('button', { name: '继续游客体验' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: '先以游客身份体验' }),
+    );
 
     expect(screen.queryByRole('dialog', { name: '账号登录' })).toBeNull();
-    expect(screen.getByRole('button', { name: '账号登录' })).toBeTruthy();
+    expect(screen.getByText('Learning OS content')).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: '登录 / 开通永久账号' }),
+    ).toBeTruthy();
   });
 });

@@ -26,31 +26,31 @@ export default function App() {
 
   return (
     <div className="app">
-      {stage === 'dashboard' && <AccountAccess />}
+      <AccountAccess>
+        <AnimatePresence mode="wait">
+          {stage === 'dashboard' && (
+            <Dashboard key="dashboard" onStart={startLearning} />
+          )}
 
-      <AnimatePresence mode="wait">
-        {stage === 'dashboard' && (
-          <Dashboard key="dashboard" onStart={startLearning} />
-        )}
+          {stage === 'learning' && (
+            <LearningShell
+              key="learning"
+              sessionId={session.current.sessionId}
+              onComplete={handleLearningComplete}
+            />
+          )}
 
-        {stage === 'learning' && (
-          <LearningShell
-            key="learning"
-            sessionId={session.current.sessionId}
-            onComplete={handleLearningComplete}
-          />
-        )}
-
-        {stage === 'result' && (
-          <SessionComplete
-            key="result"
-            cardsCompleted={lastStats?.cardsCompleted ?? 0}
-            elapsed={lastStats?.elapsed ?? 0}
-            beforeSnapshot={beforeSnapshot}
-            onBack={backToDashboard}
-          />
-        )}
-      </AnimatePresence>
+          {stage === 'result' && (
+            <SessionComplete
+              key="result"
+              cardsCompleted={lastStats?.cardsCompleted ?? 0}
+              elapsed={lastStats?.elapsed ?? 0}
+              beforeSnapshot={beforeSnapshot}
+              onBack={backToDashboard}
+            />
+          )}
+        </AnimatePresence>
+      </AccountAccess>
     </div>
   );
 }
