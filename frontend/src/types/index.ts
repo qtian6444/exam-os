@@ -167,6 +167,75 @@ export interface UserProfile {
   dailyTime: DailyTime | null;
 }
 
+// ── First-session self-report (session-scoped goal context — NOT persisted) ──
+export type StudyPurpose = 'cet_exam' | 'long_term' | 'ielts_study_abroad' | 'career';
+export type CetTarget = 'pass_425' | 'stable_pass' | 'score_500' | 'listening_speaking';
+// 当前英语基础感受（共同语义等级，跨 purpose 复用；UI 文案按 purpose 映射）。
+// 禁止保存无语义的 1/2/3/4/5。
+export type SelfBaseline = 'starter' | 'foundation' | 'developing' | 'functional' | 'strong';
+
+// 当前最想先解决的问题（所有用户共同回答）。语义字符串枚举，禁止用 1/2/3/4 序号。
+export type PrimaryObstacle =
+  | 'vocabulary_insufficient'
+  | 'words_known_sentences_unclear'
+  | 'reading_locate_unstable'
+  | 'listening_lag'
+  | 'writing_expression_hard'
+  | 'undecided_comprehensive';
+
+// 希望获得的训练支持程度（所有用户共同回答）。
+export type SupportPreference =
+  | 'more_hints_guided'
+  | 'moderate_hints_self_try'
+  | 'few_hints_challenge';
+
+// 按 purpose 的条件问题答案。仅用于三个非 CET 目标（CET 用 targetScore + examBatch）。
+// 这只是目标信息采集，不生成雅思能力判断，也不提供对应题目。
+export type LongTermFocus =
+  | 'vocab_reading_basis'
+  | 'listening_comprehension'
+  | 'daily_expression'
+  | 'comprehensive_english';
+
+export type IeltsStage =
+  | 'explore_basis'
+  | 'plan_within_year'
+  | 'plan_within_half_year'
+  | 'already_preparing';
+
+export type WorkplaceNeed =
+  | 'job_interview'
+  | 'email_writing'
+  | 'meeting_daily_comm'
+  | 'read_work_material'
+  | 'no_fixed_scene';
+
+export type PurposeDetail = LongTermFocus | IeltsStage | WorkplaceNeed;
+
+export interface FirstSessionContext {
+  purpose: StudyPurpose;
+  targetScore: CetTarget | null; // null unless purpose === cet_exam
+  selfBaseline: SelfBaseline;
+  primaryObstacle: PrimaryObstacle;
+  supportPreference: SupportPreference;
+  purposeDetail: PurposeDetail | null; // null for cet_exam; else the per-purpose answer
+  dailyTime: DailyTime; // needed by the first-session insight (learning rhythm)
+}
+
+// Full onboarding completion payload. examType/examBatch/dailyTime are persisted
+// via persistUserProfile; every self-report field stays session-scoped only.
+export interface OnboardingProfile {
+  examType: ExamType;
+  examBatch: ExamBatch;
+  dailyTime: DailyTime;
+  purpose: StudyPurpose;
+  targetScore: CetTarget | null;
+  selfBaseline: SelfBaseline;
+  primaryObstacle: PrimaryObstacle;
+  supportPreference: SupportPreference;
+  purposeDetail: PurposeDetail | null;
+}
+
 export enum AppStage {
   ONBOARDING = 'onboarding',
   DASHBOARD = 'dashboard',

@@ -4,6 +4,7 @@ import Dashboard from './components/Dashboard';
 import LearningShell from './components/LearningShell';
 import SessionComplete from './components/SessionComplete';
 import AccountAccess from './features/account/AccountAccess';
+import OnboardingFlow from './components/onboarding/OnboardingFlow';
 import { useSession } from './hooks/useSession';
 
 export default function App() {
@@ -13,6 +14,7 @@ export default function App() {
     beforeSnapshot,
     lastStats,
     startLearning,
+    completeOnboarding,
     completeSession,
     backToDashboard,
   } = useSession();
@@ -28,6 +30,13 @@ export default function App() {
     <div className="app">
       <AccountAccess>
         <AnimatePresence mode="wait">
+          {stage === 'onboarding' && (
+            <OnboardingFlow
+              key="onboarding"
+              onComplete={completeOnboarding}
+            />
+          )}
+
           {stage === 'dashboard' && (
             <Dashboard key="dashboard" onStart={startLearning} />
           )}
