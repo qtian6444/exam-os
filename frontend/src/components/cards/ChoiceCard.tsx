@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { ChoiceCardData, ChoiceOption } from '../../types';
+import type { RuleFeedback } from '../../lib/feedback';
 
 const VARIANT_LABEL: Record<string, string> = {
   cloze: '选词填空',
@@ -13,9 +14,10 @@ interface Props {
   data: ChoiceCardData;
   onChoice: (optionId: string) => void;
   locked?: boolean;
+  feedback?: RuleFeedback | null;
 }
 
-export default function ChoiceCard({ data, onChoice, locked = false }: Props) {
+export default function ChoiceCard({ data, onChoice, locked = false, feedback = null }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
 
   // 解锁（重试）时清空上一轮的选择，避免误提交同一错误答案；
@@ -65,7 +67,8 @@ export default function ChoiceCard({ data, onChoice, locked = false }: Props) {
           {data.options.map((opt, i) => (
             <motion.button
               key={opt.id}
-              className={`choice-card__option ${selected === opt.id ? 'choice-card__option--selected' : ''}`}
+              type="button"
+              className={`choice-card__option ${selected === opt.id ? 'choice-card__option--selected' : ''} ${feedback?.where.some((loc) => loc.kind === 'option' && loc.id === opt.id && loc.message.includes('你选择')) ? 'choice-card__option--feedback-wrong' : ''} ${feedback?.where.some((loc) => loc.kind === 'option' && loc.id === opt.id && loc.message.includes('正确答案')) ? 'choice-card__option--feedback-correct' : ''}`}
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: i * 0.1, duration: 0.3 }}

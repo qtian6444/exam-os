@@ -72,6 +72,7 @@ describe('buildReorderFeedback', () => {
     expect(fb.revealAnswer).toBe(false);
     expect(fb.where[0].index).toBe(0);
     expect(fb.where[0].message).toContain('第 1 个');
+    expect(fb.where.map((location) => location.index)).toEqual([0, 1]);
   });
 
   it('wrong attempt 2 → reveal with correct joined sentence', () => {

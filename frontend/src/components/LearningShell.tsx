@@ -45,6 +45,10 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
   const [attemptIndex, setAttemptIndex] = useState(1);
   const [feedback, setFeedback] = useState<RuleFeedback | null>(null);
   const savingRef = useRef(false);
+  // Keep the completion count synchronous with the save callback. React state
+  // updates are batched, so reading `cardsDone` immediately before advancing
+  // from the final card would otherwise report one fewer completed card.
+  const cardsDoneRef = useRef(0);
   const pendingRef = useRef<{ payload: PersistPayload; advanceFn: () => void } | null>(null);
   const lastAnswerRef = useRef<CardAnswer | null>(null);
 
@@ -52,12 +56,18 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
     const next = getNextCard();
     if (!next) {
       const elapsed = Date.now() - startTime;
-      onComplete({ cardsCompleted: cardsDone, elapsed });
+      onComplete({ cardsCompleted: cardsDoneRef.current, elapsed });
     } else {
       setCurrentCard(next);
       setCardKey((k) => k + 1);
     }
-  }, [cardsDone, onComplete, startTime]);
+  }, [onComplete, startTime]);
+
+  const markCardDone = useCallback(() => {
+    const nextCount = cardsDoneRef.current + 1;
+    cardsDoneRef.current = nextCount;
+    setCardsDone(nextCount);
+  }, []);
 
   // Load first card
   useEffect(() => {
@@ -143,7 +153,7 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
             userAnswer: { selectedOptionId: optionId },
           },
           () => {
-            setCardsDone((n) => n + 1);
+            markCardDone();
             advance();
           },
         );
@@ -157,7 +167,7 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
         presentationVariant: card.presentationVariant ?? 'standard',
       });
     },
-    [currentCard, saveAndAdvance, advance, handleAnswer],
+    [currentCard, saveAndAdvance, advance, handleAnswer, markCardDone],
   );
 
   const handleReorderSubmit = useCallback(
@@ -179,11 +189,11 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
     saveAndAdvance(
       { cardType: 'reading_breakdown', cardId: card.cardId, correct: null, userAnswer: null },
       () => {
-        setCardsDone((n) => n + 1);
+        markCardDone();
         advance();
       },
     );
-  }, [currentCard, saveAndAdvance, advance]);
+  }, [currentCard, saveAndAdvance, advance, markCardDone]);
 
   // 首次错误后同题重试：保持卡片挂载（Reorder 保留用户排列可编辑），仅解锁并重置判题。
   const handleRetry = useCallback(() => {
@@ -220,12 +230,12 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
         userAnswer,
       },
       () => {
-        setCardsDone((n) => n + 1);
+        markCardDone();
         resetFlow();
         advance();
       },
     );
-  }, [currentCard, feedback, saveAndAdvance, advance, resetFlow]);
+  }, [currentCard, feedback, saveAndAdvance, advance, resetFlow, markCardDone]);
 
   if (!currentCard) {
     return (
@@ -251,6 +261,7 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
             data={currentCard as ChoiceCardData}
             onChoice={handleChoice}
             locked={locked}
+            feedback={feedback}
           />
         );
       case 'reading_breakdown' as CardType:
@@ -268,6 +279,7 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
             data={currentCard as ReorderCardData}
             onSubmit={handleReorderSubmit}
             locked={locked}
+            feedback={feedback}
           />
         );
       default:

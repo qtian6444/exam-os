@@ -1,4 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
+
+// The adapter tests inject their auth client explicitly. Keep module loading
+// independent from deployment-only Vite secrets so `npm test` works in a clean
+// checkout without a local Supabase project.
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: vi.fn(() => ({ auth: {} })),
+}));
+vi.mock('../../lib/supabase', () => ({
+  supabase: { auth: {} },
+}));
+
 import {
   classifyAccountIdentity,
   loginWithPhonePassword,

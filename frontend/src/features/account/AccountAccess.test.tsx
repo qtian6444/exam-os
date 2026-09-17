@@ -1,5 +1,15 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// AccountAccess tests inject identity/login dependencies. Mock the module-level
+// Supabase client so the UI contract can run without deployment env variables.
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: vi.fn(() => ({ auth: {} })),
+}));
+vi.mock('../../lib/supabase', () => ({
+  supabase: { auth: {} },
+}));
+
 import {
   cleanup,
   fireEvent,

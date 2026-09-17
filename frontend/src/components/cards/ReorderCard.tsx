@@ -1,14 +1,16 @@
 import { useState, useCallback } from 'react';
 import { motion, Reorder } from 'framer-motion';
 import type { ReorderCardData, ChunkItem } from '../../types';
+import type { RuleFeedback } from '../../lib/feedback';
 
 interface Props {
   data: ReorderCardData;
   onSubmit: (orderedIds: string[]) => void;
   locked?: boolean;
+  feedback?: RuleFeedback | null;
 }
 
-export default function ReorderCard({ data, onSubmit, locked = false }: Props) {
+export default function ReorderCard({ data, onSubmit, locked = false, feedback = null }: Props) {
   const [items, setItems] = useState<ChunkItem[]>(() =>
     [...data.chunks].sort(() => Math.random() - 0.5),
   );
@@ -39,7 +41,7 @@ export default function ReorderCard({ data, onSubmit, locked = false }: Props) {
           <Reorder.Item
             key={chunk.id}
             value={chunk}
-            className="reorder-card__chunk"
+            className={`reorder-card__chunk ${feedback?.where.some((loc) => loc.kind === 'block' && loc.index === i) ? 'reorder-card__chunk--mismatch' : ''}`}
           >
             <span className="reorder-card__chunk-num">{i + 1}</span>
             <span className="reorder-card__chunk-text">{chunk.text}</span>

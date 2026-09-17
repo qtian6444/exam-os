@@ -123,13 +123,12 @@ export function buildReorderFeedback(
     answer.orderedChunkIds.every((id, i) => id === answer.correctOrder[i]);
   const reveal = !correct && attemptIndex >= 2;
 
-  let firstMismatch = -1;
+  const mismatchIndexes: number[] = [];
   if (!correct) {
     const len = Math.max(answer.orderedChunkIds.length, answer.correctOrder.length);
     for (let i = 0; i < len; i++) {
       if (answer.orderedChunkIds[i] !== answer.correctOrder[i]) {
-        firstMismatch = i;
-        break;
+        mismatchIndexes.push(i);
       }
     }
   }
@@ -139,11 +138,11 @@ export function buildReorderFeedback(
     .join(' ');
 
   const where: FeedbackLocation[] = [];
-  if (!correct && firstMismatch >= 0) {
+  for (const index of mismatchIndexes) {
     where.push({
       kind: 'block',
-      index: firstMismatch,
-      message: `第 ${firstMismatch + 1} 个词块位置不对`,
+      index,
+      message: `第 ${index + 1} 个词块位置不对`,
     });
   }
 

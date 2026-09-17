@@ -2,6 +2,14 @@ import { motion } from 'framer-motion';
 import type { RuleFeedback } from '../lib/feedback';
 import type { CardTeaching } from '../types';
 
+const DIMENSION_LABELS: Record<RuleFeedback['dimensions'][number], string> = {
+  vocabulary: '词汇',
+  sentence: '长难句',
+  reading: '阅读',
+  listening: '听力',
+  writing: '写作',
+};
+
 interface FeedbackPanelProps {
   feedback: RuleFeedback;
   teaching?: CardTeaching;
@@ -63,6 +71,15 @@ export default function FeedbackPanel({
         <span className="feedback-panel__label">下一步</span>
         <p className="feedback-panel__text">{feedback.next}</p>
       </div>
+
+      {feedback.dimensions.length > 0 && (
+        <div className="feedback-panel__block">
+          <span className="feedback-panel__label">本题涉及</span>
+          <p className="feedback-panel__text">
+            {feedback.dimensions.map((dimension) => DIMENSION_LABELS[dimension]).join('、')}
+          </p>
+        </div>
+      )}
 
       {teaching && onContinue && (
         <div className="feedback-panel__teaching">
