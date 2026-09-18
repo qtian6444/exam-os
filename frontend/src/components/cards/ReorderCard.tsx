@@ -2,6 +2,8 @@ import { useState, useCallback } from 'react';
 import { motion, Reorder } from 'framer-motion';
 import type { ReorderCardData, ChunkItem } from '../../types';
 import type { RuleFeedback } from '../../lib/feedback';
+import SourceTrace from '../SourceTrace';
+import { buildDeterministicInitialOrder } from './reorderOrder';
 
 interface Props {
   data: ReorderCardData;
@@ -11,9 +13,7 @@ interface Props {
 }
 
 export default function ReorderCard({ data, onSubmit, locked = false, feedback = null }: Props) {
-  const [items, setItems] = useState<ChunkItem[]>(() =>
-    [...data.chunks].sort(() => Math.random() - 0.5),
-  );
+  const [items, setItems] = useState<ChunkItem[]>(() => buildDeterministicInitialOrder(data));
 
   const handleSubmit = useCallback(() => {
     if (locked) return;
@@ -29,7 +29,12 @@ export default function ReorderCard({ data, onSubmit, locked = false, feedback =
       exit={{ opacity: 0, y: -24 }}
       transition={{ duration: 0.35 }}
     >
-      <p className="reorder-card__prompt">按正确顺序排列句子：</p>
+      <div className="reorder-card__prompt-row">
+        <p className="reorder-card__prompt">按正确顺序排列句子：</p>
+        <span className="reorder-card__gesture-hint">按住词块拖动</span>
+      </div>
+
+      <SourceTrace detail={data.sourceDetail} />
 
       <Reorder.Group
         axis="y"
@@ -45,6 +50,7 @@ export default function ReorderCard({ data, onSubmit, locked = false, feedback =
           >
             <span className="reorder-card__chunk-num">{i + 1}</span>
             <span className="reorder-card__chunk-text">{chunk.text}</span>
+            <span className="reorder-card__drag-handle" aria-hidden="true">⋮⋮</span>
           </Reorder.Item>
         ))}
       </Reorder.Group>

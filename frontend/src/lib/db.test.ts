@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 vi.mock('./supabase', () => ({
   supabase: { from: vi.fn(), rpc: vi.fn() },
   getAuthUserId: vi.fn(),
+  isSupabaseConfigured: true,
 }));
 
 import { supabase, getAuthUserId } from './supabase';

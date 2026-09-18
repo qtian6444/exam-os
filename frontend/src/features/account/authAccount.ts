@@ -1,5 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
-import { supabase } from '../../lib/supabase';
+import {
+  isSupabaseConfigured,
+  supabase,
+  supabaseRuntimeConfig,
+} from '../../lib/supabase';
 import type {
   AccountCredentials,
   AccountIdentity,
@@ -42,8 +46,8 @@ interface AuthErrorShape {
 }
 
 const verificationClient = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY,
+  supabaseRuntimeConfig.url,
+  supabaseRuntimeConfig.anonKey,
   {
     auth: {
       persistSession: false,
@@ -115,6 +119,13 @@ export async function loginWithPhonePassword(
   credentials: AccountCredentials,
   auth: PasswordAuthClient = passwordVerifier,
 ): Promise<PasswordLoginAttempt> {
+  // A local, unconfigured checkout is intentionally a guest-only demo. Do not
+  // send a typed phone/password pair to a placeholder endpoint, and do not
+  // imply that an account session was created.
+  if (!isSupabaseConfigured && auth === passwordVerifier) {
+    return { result: 'NETWORK_ERROR' };
+  }
+
   let phone: string;
   try {
     phone = normalizePhoneToE164(credentials.phone);

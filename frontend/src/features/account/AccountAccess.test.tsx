@@ -8,6 +8,8 @@ vi.mock('@supabase/supabase-js', () => ({
 }));
 vi.mock('../../lib/supabase', () => ({
   supabase: { auth: {} },
+  isSupabaseConfigured: true,
+  supabaseRuntimeConfig: { url: 'https://example.test', anonKey: 'test-key' },
 }));
 
 import {
@@ -23,7 +25,7 @@ afterEach(cleanup);
 
 async function openLogin() {
   const entry = await screen.findByRole('button', {
-    name: '登录永久账号',
+    name: /已有账号/,
   });
   fireEvent.click(entry);
 }
@@ -38,7 +40,7 @@ function fillValidForm() {
 }
 
 describe('AccountAccess', () => {
-  it('shows the welcome value before rendering Learning OS for anonymous users', async () => {
+  it('shows the guest-only training entry before rendering Learning OS for anonymous users', async () => {
     render(
       <AccountAccess readIdentity={async () => 'ANONYMOUS'}>
         <div>Learning OS content</div>
@@ -46,9 +48,10 @@ describe('AccountAccess', () => {
     );
 
     expect(
-      await screen.findByText('登录后，AI会持续理解你的英语学习状态。'),
+      await screen.findByRole('heading', { name: '以真题为舟，渡向更大的世界。' }),
     ).toBeTruthy();
-    expect(screen.getByRole('button', { name: '游客体验' })).toBeTruthy();
+    expect(screen.getByText('真题阅读与句法')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /开始体验/ })).toBeTruthy();
     expect(screen.queryByText('Learning OS content')).toBeNull();
   });
 
@@ -70,7 +73,7 @@ describe('AccountAccess', () => {
       </AccountAccess>,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: '游客体验' }));
+    fireEvent.click(await screen.findByRole('button', { name: /开始体验/ }));
 
     expect(screen.getByText('Learning OS content')).toBeTruthy();
     expect(
@@ -84,7 +87,7 @@ describe('AccountAccess', () => {
     expect(screen.getByText('Learning OS content')).toBeTruthy();
   });
 
-  it('switches between product value, WeChat activation, and account login', async () => {
+  it('switches between guest experience, manual activation, and account login', async () => {
     render(
       <AccountAccess readIdentity={async () => 'ANONYMOUS'}>
         <div>Learning OS content</div>
@@ -93,7 +96,7 @@ describe('AccountAccess', () => {
 
     fireEvent.click(
       await screen.findByRole('button', {
-        name: '还没有账号？微信人工开通',
+        name: /人工开通/,
       }),
     );
 
@@ -185,7 +188,7 @@ describe('AccountAccess', () => {
     fireEvent.click(screen.getByRole('button', { name: '重新读取' }));
 
     expect(
-      await screen.findByText('登录后，AI会持续理解你的英语学习状态。'),
+      await screen.findByRole('heading', { name: '以真题为舟，渡向更大的世界。' }),
     ).toBeTruthy();
     expect(readIdentity).toHaveBeenCalledTimes(2);
   });
@@ -207,5 +210,19 @@ describe('AccountAccess', () => {
     expect(
       screen.getByRole('button', { name: '登录 / 开通永久账号' }),
     ).toBeTruthy();
+  });
+
+  it('keeps the reading-and-syntax demo inside the guest entry only', async () => {
+    render(
+      <AccountAccess readIdentity={async () => 'ANONYMOUS'}>
+        <div>Learning OS content</div>
+      </AccountAccess>,
+    );
+
+    expect(await screen.findByText('真题阅读与句法')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /已有账号/ }));
+
+    expect(screen.getByRole('dialog', { name: '账号登录' })).toBeTruthy();
+    expect(screen.queryByText('真题阅读与句法')).toBeNull();
   });
 });

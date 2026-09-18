@@ -34,6 +34,18 @@ export interface CardTeaching {
   hook: string;
 }
 
+// Visible provenance for a training item. This is presentation metadata only;
+// it does not change the stored learning-evidence protocol.
+export interface ContentSourceDetail {
+  exam: 'CET-4' | 'CET-6';
+  examDate: string;
+  paper: string;
+  location: string;
+  material: string;
+  status: 'PROJECT_MATERIAL_VERIFIED';
+  disclosure: string;
+}
+
 export interface ChoiceCardData {
   cardId: string;
   cardType: CardType.CHOICE;
@@ -44,6 +56,7 @@ export interface ChoiceCardData {
   presentationVariant?: ChoicePresentationVariant;
   prompt?: string;
   source?: string;
+  sourceDetail?: ContentSourceDetail;
   teaching?: CardTeaching;
 }
 
@@ -91,6 +104,7 @@ export interface ReorderCardData {
   chunks: ChunkItem[];
   correctOrder: string[]; // ordered chunk IDs
   source?: string;
+  sourceDetail?: ContentSourceDetail;
   teaching?: CardTeaching;
 }
 
@@ -257,4 +271,33 @@ export interface SessionAction {
   cardId: string;
   correct: boolean | null;
   timestamp: number;
+}
+
+// A session-only summary of observable learner behaviour. It is deliberately
+// not a long-term ability claim, mastery status, or spaced-review schedule.
+export type SessionOutcome =
+  | 'FIRST_TRY_CORRECT'
+  | 'RETRY_CORRECT'
+  | 'REVEALED_AFTER_RETRY';
+
+export type EvidenceDimension =
+  | 'vocabulary'
+  | 'sentence'
+  | 'reading'
+  | 'listening'
+  | 'writing';
+
+export interface SessionEvidenceItem {
+  cardId: string;
+  cardType: CardType;
+  outcome: SessionOutcome;
+  attempts: 1 | 2;
+  dimensions: EvidenceDimension[];
+  sourceDetail?: ContentSourceDetail;
+}
+
+export interface SessionStats {
+  cardsCompleted: number;
+  elapsed: number;
+  evidence: SessionEvidenceItem[];
 }

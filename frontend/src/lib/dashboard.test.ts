@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 vi.mock('./supabase', () => ({
   supabase: { from: vi.fn() },
   getAuthUserId: vi.fn(),
+  isSupabaseConfigured: true,
 }));
 vi.mock('./db', () => ({
   persistUserProfile: vi.fn(),

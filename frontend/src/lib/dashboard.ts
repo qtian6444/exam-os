@@ -11,7 +11,7 @@
 //     exists yet (fresh anonymous user), create it with sensible defaults so the
 //     first `apply_learning_evidence` call never hits PROFILE_NOT_FOUND.
 
-import { supabase, getAuthUserId } from './supabase';
+import { supabase, getAuthUserId, isSupabaseConfigured } from './supabase';
 import { persistUserProfile } from './db';
 import type { ExamType, ExamBatch, DailyTime } from '../types';
 
@@ -75,6 +75,7 @@ export function computeStreak(dateKeys: string[], todayKey: string): number {
 const STATS_WINDOW_DAYS = 60;
 
 export async function getLearningStats(): Promise<LearningStats> {
+  if (!isSupabaseConfigured) return { todayCount: null, streak: null };
   const todayKey = toLocalDateKey(new Date());
   try {
     const since = new Date(Date.now() - STATS_WINDOW_DAYS * 86_400_000).toISOString();
@@ -106,6 +107,7 @@ export async function getLearningStats(): Promise<LearningStats> {
  * a real failure — the caller must then block the transition to learning.
  */
 export async function ensureProfileReady(): Promise<boolean> {
+  if (!isSupabaseConfigured) return true;
   try {
     const uid = await getAuthUserId();
     const { data, error } = await supabase

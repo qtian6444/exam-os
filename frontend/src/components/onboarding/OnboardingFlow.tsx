@@ -16,6 +16,7 @@ import type {
   WorkplaceNeed,
 } from '../../types';
 import { buildFirstSessionInsight, type InsightIcon } from './insight';
+import './OnboardingV2.css';
 
 const SLIDE_ANIMATION = {
   initial: { opacity: 0, x: 40 },
@@ -500,6 +501,9 @@ export default function OnboardingFlow({ onComplete }: Props) {
             <h1 className="onboarding__title">Exam OS</h1>
             <p className="onboarding__subtitle">
               先用一分钟了解你的英语目标，接下来训练会更适合你。
+            </p>
+            <p className="onboarding__trust-note">
+              这些回答只用于确定学习起点；能力线索会在真实作答后生成。
             </p>
             <motion.button
               className="onboarding__btn onboarding__btn--primary"

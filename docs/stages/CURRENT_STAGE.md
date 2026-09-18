@@ -1,7 +1,7 @@
 # Exam OS Current Stage
 
-Stage ID: P0-LEARNING-INTERACTION-01
-Stage Name: 训练交互纠偏（解析型页面 → 训练型页面）
+Stage ID: P0-DEMO-V2-01
+Stage Name: V2 演示可信层（题源 → 行为证据 → 下一步）
 Status: ACTIVE
 Priority: P0
 
@@ -27,6 +27,30 @@ Priority: P0
 
 ## 1. 本 Stage 唯一目标
 
+在不改变 Learning Engine、账号协议或数据库协议的前提下，将 V1.0 Pro
+收束为可录制、可解释的 V2 演示体验：
+
+```text
+游客一键进入
+→ 看到可追溯题源
+→ 先行动、获得反馈、重试或揭示
+→ 看到本次真实行为证据
+→ 看到基于该证据的下一步建议
+```
+
+本 Stage 不是完整 V2 Decision Engine、掌握度系统或复习调度器的实现。
+
+### Product Owner 授权（2026-09-17）
+
+- 优先服务于明日的黑客松演示、PPT 与录屏。
+- 游客体验是默认演示路径；永久账号仅保留为内测入口。
+- 题源基于 Product Owner 提供的真题解析资料；不得表述为教育部官方校准或官方难度标准。
+- 所有本轮结果均是本次 session 的行为证据，不宣称长期能力定论或掌握结论。
+
+---
+
+## 2. 前任 Stage 记录：P0-LEARNING-INTERACTION-01
+
 将当前「解析型页面」（用户被动看拆解、看题）改造成「用户必须主动操作的训练型页面」。
 
 每条训练题必须满足：
@@ -42,7 +66,7 @@ ReadingBreakdown 从「默认主流程」退为「支架状态」（对齐 C06�
 
 ---
 
-## 2. 参考边界
+## 3. 参考边界
 
 ### Duolingo 只参考
 
@@ -70,57 +94,53 @@ ReadingBreakdown 从「默认主流程」退为「支架状态」（对齐 C06�
 
 ---
 
-## 3. 允许修改
+## 4. 允许修改
 
-- ReadingBreakdown 默认流程
-- Reorder 题型交互与默认难度
-- Choice 题型呈现
-- 默认训练题队列
-- 训练页面前端展示
-- 对应前端测试和必要样式
+- 游客入口的展示优先级与内测标识（不改 Auth 流程）
+- Choice / Reorder 卡片的题源追溯展示
+- 会话级行为证据汇总、下一步学习建议与完成页 UI
+- Dashboard 的确定性文案（不改能力模型或数据读取）
+- 对应前端测试、类型与必要样式
 
 ---
 
-## 4. 禁止修改
+## 5. 禁止修改
 
-- 数据库结构
-- `db.ts`
-- `saveExecutor.ts`
-- RPC
-- RLS
-- migrations
-- Auth
-- 能力模型
-- 学习证据保存协议
+- 数据库结构、`db.ts`、`saveExecutor.ts`、RPC、RLS、migrations
+- Auth 登录/创建账号/永久账号发放逻辑
+- 能力模型、学习证据保存协议、复习调度与掌握度阈值
 - DeepSeek 服务端安全边界
+- 任意难度分级、能力分段、复习间隔的“官方化”表达
 
 > 以上禁止项即 R9 冻结层 + 学习证据协议 + DeepSeek 服务端边界。
 > 若开发中确需触碰上述任一冻结项，立即停止并输出 `SPEC_CONFLICT`，不自行绕过。
 
 ---
 
-## 5. 验收标准（Definition of Done）
+## 6. 验收标准（Definition of Done）
 
 只有以下全部满足，Implementation Agent 才能输出 `IMPLEMENTATION_COMPLETE`：
 
-### 交互目标
+### 演示目标
 
-- 默认训练流程为「用户主动操作型」：每题要求至少一个主动动作后才能推进；ReadingBreakdown 不再作为默认主流程（退为支架，C06）。
-- 作答后即时反馈：对错 + 局部原因 + 下一步，来源为「用户答案 vs 正确答案的真实差异 + 题型规则 + 五维能力映射」，不虚构、不空洞（C16）。
-- 错误不形成通关墙（C11）：首次错误可重试；达到当前规则最大尝试后揭示答案并允许继续。
-- 移动端一题一个主要动作，低摩擦（C15）。
-- 强化/验证无安全可用同类型题时，走 `PENDING_VALIDATION` 兜底并允许继续，不随机凑题。
+- 游客可以一键进入默认演示路径，永久账号明确标识为内测。
+- 默认训练流程保持「用户主动操作 → 即时反馈 → 重试/揭示 → 继续」。
+- 每张默认卡展示可追溯题源：考试、套题、位置和项目资料状态。
+- 完成页只总结本次真实行为（完成数、真实 elapsed、首次正确/重试/揭示），不制造能力提升或掌握结论。
+- 下一步建议只由本次可见 evidence 推导，说明它不是复习调度或长期诊断。
+- 移动端保持一题一个主要动作。
 
 ### 冻结层与协议
 
 - `db.ts` / `saveExecutor.ts` / RPC / RLS / migrations / Auth / 能力模型 / 学习证据保存协议 / DeepSeek 服务端边界 **无 diff**。
 - 最终学习证据仍走现有 `applyLearningEvidence` 链路，`p_user_answer` 数据结构不变，不新增持久化字段、不改 JSON 协议。
-- 每张原始卡片最多写一次证据；重试 / 提示过程只存前端状态，不单独落库。
+- 每张原始卡片最多写一次证据；本轮会话摘要只在前端内存中组织，不新增持久化字段。
 
 ### 边界合规
 
 - 不引入 Duolingo / 听劫 的品牌视觉、角色、商业机制、完整产品结构（只取交互原则）。
-- 不引入真实 LLM / 新 API 依赖；反馈仍为规则 + 差异驱动，不虚构 AI 分析。
+- 不引入真实 LLM / 新 API 依赖；反馈与下一步建议仍为规则 + 行为事实驱动，不虚构 AI 分析。
+- `PROJECT_MATERIAL_VERIFIED` 只能表示已与 Product Owner 提供的资料核对，不等于教育部官方认证。
 
 ### 验证
 
@@ -128,15 +148,15 @@ ReadingBreakdown 从「默认主流程」退为「支架状态」（对齐 C06�
 - lint 通过
 - build 通过
 - 现有 tests 通过
-- 新增针对交互的前端测试通过（Choice 提交 / Reorder 判题 / 反馈面板 / 重试与揭示流程）
+- 新增会话 evidence / 题源可见 / 游客 CTA 的前端测试通过
 
 ---
 
-## 6. Git 与交卷
+## 7. Git 与交卷
 
 完成开发与测试后：
 
-1. 确认 git diff 只包含本 Stage 授权范围（`frontend/src/components/**`、`frontend/src/features/**`、`frontend/src/lib/feedback*`、`frontend/src/data/mock.ts`、必要样式与测试），不含任何冻结层文件。
+1. 确认 git diff 只包含本 Stage 授权范围（`frontend/src/components/**`、`frontend/src/features/**`、`frontend/src/types/**`、`frontend/src/data/mock.ts`、必要样式与测试），不含任何冻结层文件。
 2. 填写 `docs/stages/REVIEW_HANDOFF.md`（或按协议输出交接）。
 3. 返回 `IMPLEMENTATION_COMPLETE` + 修改文件清单 + typecheck/lint/build/test 结果 + 冻结层无 diff 证据。
 

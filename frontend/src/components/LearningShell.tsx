@@ -6,6 +6,8 @@ import type {
   ChoiceCardData,
   ReorderCardData,
   ReadingBreakdownCardData,
+  SessionEvidenceItem,
+  SessionStats,
 } from '../types';
 import { getNextCard, getTotalCards } from '../data/mock';
 import { applyLearningEvidence } from '../lib/db';
@@ -16,9 +18,10 @@ import ReadingBreakdownCard from './cards/ReadingBreakdownCard';
 import ReorderCard from './cards/ReorderCard';
 import FeedbackPanel from './FeedbackPanel';
 import SessionTimer from './SessionTimer';
+import './LearningV2.css';
 
 interface Props {
-  onComplete: (stats: { cardsCompleted: number; elapsed: number }) => void;
+  onComplete: (stats: SessionStats) => void;
   sessionId: string;
 }
 
@@ -51,12 +54,23 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
   const cardsDoneRef = useRef(0);
   const pendingRef = useRef<{ payload: PersistPayload; advanceFn: () => void } | null>(null);
   const lastAnswerRef = useRef<CardAnswer | null>(null);
+  // React StrictMode intentionally replays effects in development. Guard the
+  // initial dequeue so the local preview and the production build always begin
+  // with the same first card rather than silently consuming card 1 twice.
+  const initialLoadRef = useRef(false);
+  // This is a session-only view of already-persisted card results. It enables a
+  // transparent completion screen without changing the database evidence shape.
+  const sessionEvidenceRef = useRef<SessionEvidenceItem[]>([]);
 
   const advance = useCallback(() => {
     const next = getNextCard();
     if (!next) {
       const elapsed = Date.now() - startTime;
-      onComplete({ cardsCompleted: cardsDoneRef.current, elapsed });
+      onComplete({
+        cardsCompleted: cardsDoneRef.current,
+        elapsed,
+        evidence: [...sessionEvidenceRef.current],
+      });
     } else {
       setCurrentCard(next);
       setCardKey((k) => k + 1);
@@ -69,8 +83,31 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
     setCardsDone(nextCount);
   }, []);
 
+  const recordSessionEvidence = useCallback(
+    (card: LearningCard, result: RuleFeedback, attempts: 1 | 2) => {
+      const sourceDetail = 'sourceDetail' in card ? card.sourceDetail : undefined;
+      const outcome: SessionEvidenceItem['outcome'] = result.correct
+        ? attempts === 1
+          ? 'FIRST_TRY_CORRECT'
+          : 'RETRY_CORRECT'
+        : 'REVEALED_AFTER_RETRY';
+
+      sessionEvidenceRef.current.push({
+        cardId: card.cardId,
+        cardType: card.cardType,
+        outcome,
+        attempts,
+        dimensions: [...result.dimensions],
+        sourceDetail,
+      });
+    },
+    [],
+  );
+
   // Load first card
   useEffect(() => {
+    if (initialLoadRef.current) return;
+    initialLoadRef.current = true;
     advance();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -230,12 +267,22 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
         userAnswer,
       },
       () => {
+        recordSessionEvidence(card, fb, attemptIndex as 1 | 2);
         markCardDone();
         resetFlow();
         advance();
       },
     );
-  }, [currentCard, feedback, saveAndAdvance, advance, resetFlow, markCardDone]);
+  }, [
+    currentCard,
+    feedback,
+    saveAndAdvance,
+    advance,
+    resetFlow,
+    markCardDone,
+    recordSessionEvidence,
+    attemptIndex,
+  ]);
 
   if (!currentCard) {
     return (
@@ -290,10 +337,20 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
   return (
     <div className="learning-shell">
       <div className="learning-shell__header">
-        <SessionTimer startTime={startTime} />
-        <span className="learning-shell__progress">
-          {cardsDone + 1}/{totalCards}
-        </span>
+        <div className="learning-shell__identity">
+          <span className="learning-shell__seal" aria-hidden="true">考</span>
+          <div>
+            <strong>Exam OS</strong>
+            <p>真题阅读与句法</p>
+          </div>
+        </div>
+        <div className="learning-shell__session-meta">
+          <span className="learning-shell__local-note">本次训练</span>
+          <SessionTimer startTime={startTime} />
+          <span className="learning-shell__progress">
+            {cardsDone + 1} / {totalCards}
+          </span>
+        </div>
       </div>
 
       {saveError && (
@@ -305,7 +362,12 @@ export default function LearningShell({ onComplete, sessionId }: Props) {
         </div>
       )}
 
-      <div className="learning-shell__card-area">
+      <div className={`learning-shell__card-area${feedback ? ' learning-shell__card-area--feedback' : ''}`}>
+        <div className="learning-shell__context">
+          <p>当前训练</p>
+          <h1>在真实语境中读懂句子与文章</h1>
+          <span>首次错误只给线索；完成后记录本次作答，不把一次训练写成长期结论。</span>
+        </div>
         <AnimatePresence mode="wait">{renderCard()}</AnimatePresence>
 
         {feedback && phase !== 'answering' && (

@@ -11,11 +11,13 @@ import type {
   SupportPreference,
   PurposeDetail,
   DailyTime,
+  SessionStats,
 } from '../types';
 import { getAbilitySnapshot, persistUserProfile } from '../lib/db';
-import { getAuthUserId } from '../lib/supabase';
+import { getAuthUserId, isSupabaseConfigured, LOCAL_DEMO_USER_ID } from '../lib/supabase';
 import { blankSnapshot, type AbilitySnapshot } from '../lib/ability';
 import { ensureProfileReady } from '../lib/dashboard';
+import { persistLocalGuestSessionProfile } from '../lib/sessionEvidence';
 import { resetCardQueue } from '../data/mock';
 
 function generateId(): string {
@@ -123,11 +125,6 @@ function writeOnboardingContext(uid: string, context: FirstSessionContext): bool
   }
 }
 
-export interface SessionStats {
-  cardsCompleted: number;
-  elapsed: number;
-}
-
 export function useSession() {
   // Starts at dashboard (safe for returning users) and flips to onboarding only
   // once the auth identity is known AND no identity-scoped "done" marker exists.
@@ -138,6 +135,7 @@ export function useSession() {
   // against a fresh post-session read to show the ability delta.
   const [beforeSnapshot, setBeforeSnapshot] = useState<AbilitySnapshot | null>(null);
   const [lastStats, setLastStats] = useState<SessionStats | null>(null);
+  const [profileContext, setProfileContext] = useState<FirstSessionContext | null>(null);
 
   // auth.uid() is the data-ownership identity; both guest (anonymous) and
   // permanent (phone) sessions have one. Used to scope the onboarding marker.
@@ -168,6 +166,7 @@ export function useSession() {
           // Restore the structured self-report for future personalization; the
           // user already finished onboarding this session, so stay on dashboard.
           selfReportRef.current = context;
+          setProfileContext(context);
         } else {
           // Missing/corrupt context OR missing done marker → re-onboard. This is
           // the "context 缺失或损坏时重新进入 onboarding" rule.
@@ -184,17 +183,20 @@ export function useSession() {
   }, []);
 
   const startLearning = useCallback(async (): Promise<boolean> => {
-    // Ensure a profile row exists (fresh anonymous user → create defaults) so
-    // the first apply_learning_evidence never hits PROFILE_NOT_FOUND.
-    const ready = await ensureProfileReady();
-    if (!ready) return false;
+    let before: AbilitySnapshot = blankSnapshot();
 
-    // Capture the ability snapshot BEFORE this session for the result delta.
-    let before: AbilitySnapshot;
-    try {
-      before = await getAbilitySnapshot();
-    } catch {
-      before = blankSnapshot();
+    if (isSupabaseConfigured) {
+      // Ensure a profile row exists (fresh anonymous user → create defaults) so
+      // the first apply_learning_evidence never hits PROFILE_NOT_FOUND.
+      const ready = await ensureProfileReady();
+      if (!ready) return false;
+
+      // Capture the ability snapshot BEFORE this session for the result delta.
+      try {
+        before = await getAbilitySnapshot();
+      } catch {
+        before = blankSnapshot();
+      }
     }
     setBeforeSnapshot(before);
 
@@ -212,16 +214,38 @@ export function useSession() {
     return true;
   }, []);
 
+  // The public six-card route is a deliberately small, local-only demo. It
+  // collects the same session-scoped starting context as an account, but must
+  // not use self-report as ability, create a remote profile, or imply an
+  // onboarding-derived recommendation. The flow continues into six cards only
+  // after the user finishes the short starting-context interview.
+  const startGuestExperience = useCallback(() => {
+    if (!isSupabaseConfigured) identityRef.current = LOCAL_DEMO_USER_ID;
+    setBeforeSnapshot(blankSnapshot());
+    resetCardQueue();
+    sessionRef.current = {
+      sessionId: generateId(),
+      startTime: Date.now(),
+      endTime: null,
+      cardsCompleted: 0,
+      actions: [],
+    };
+    setLastStats(null);
+    setStage('onboarding' as AppStage);
+  }, []);
+
   const completeOnboarding = useCallback(
     async (profile: OnboardingProfile): Promise<boolean> => {
       // Persist only the USER_EDITABLE profile columns; every self-report field
       // stays session-scoped and never reaches the database or ability model.
-      const persisted = await persistUserProfile({
-        examType: profile.examType,
-        examBatch: profile.examBatch,
-        dailyTime: profile.dailyTime,
-      });
-      if (!persisted) return false;
+      if (isSupabaseConfigured) {
+        const persisted = await persistUserProfile({
+          examType: profile.examType,
+          examBatch: profile.examBatch,
+          dailyTime: profile.dailyTime,
+        });
+        if (!persisted) return false;
+      }
 
       const context: FirstSessionContext = {
         purpose: profile.purpose,
@@ -253,6 +277,7 @@ export function useSession() {
       }
 
       selfReportRef.current = context;
+      setProfileContext(context);
 
       await startLearning();
       return true;
@@ -263,6 +288,11 @@ export function useSession() {
   const completeSession = useCallback((stats: SessionStats) => {
     sessionRef.current.endTime = Date.now();
     sessionRef.current.cardsCompleted = stats.cardsCompleted;
+    if (!isSupabaseConfigured) {
+      // Guest mode gets a session-scoped, factual summary so the dashboard can
+      // show what was observed without inventing a long-term ability score.
+      persistLocalGuestSessionProfile(sessionRef.current.sessionId, stats);
+    }
     setLastStats(stats);
     setStage('result' as AppStage);
   }, []);
@@ -277,8 +307,10 @@ export function useSession() {
     session: sessionRef,
     beforeSnapshot,
     lastStats,
+    profileContext,
     selfReport: selfReportRef,
     startLearning,
+    startGuestExperience,
     completeOnboarding,
     completeSession,
     backToDashboard,

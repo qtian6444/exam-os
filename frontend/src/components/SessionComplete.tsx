@@ -1,58 +1,80 @@
-import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import type { AbilitySnapshot, AbilityKey } from '../lib/ability';
-import { getAbilityKey, blankSnapshot } from '../lib/ability';
-import { getAbilitySnapshot } from '../lib/db';
-import { generateSuggestion, analyzeResult } from '../lib/suggestion';
+import type { EvidenceDimension, SessionEvidenceItem } from '../types';
+import './CompletionV2.css';
 
 interface Props {
   cardsCompleted: number;
   elapsed: number;
-  beforeSnapshot: AbilitySnapshot | null;
+  evidence: SessionEvidenceItem[];
   onBack: () => void;
 }
 
-const DIMENSIONS: { key: AbilityKey; label: string }[] = [
-  { key: 'vocabulary', label: '词汇' },
-  { key: 'sentence', label: '长难句' },
-  { key: 'reading', label: '阅读' },
-  { key: 'listening', label: '听力' },
-  { key: 'writing', label: '写作' },
-];
+const DIMENSION_LABELS: Record<EvidenceDimension, string> = {
+  vocabulary: '词汇',
+  sentence: '句子结构',
+  reading: '阅读定位',
+  listening: '听力',
+  writing: '写作',
+};
 
-function toPercent(v: number): number {
-  return Math.round(Math.max(0, Math.min(1, v)) * 100);
+const OUTCOME_COPY: Record<SessionEvidenceItem['outcome'], { label: string; detail: string }> = {
+  FIRST_TRY_CORRECT: {
+    label: '首次完成',
+    detail: '本题首次作答即与参考答案一致。',
+  },
+  RETRY_CORRECT: {
+    label: '调整后完成',
+    detail: '本题在提示后再次尝试，与参考答案一致。',
+  },
+  REVEALED_AFTER_RETRY: {
+    label: '已查看解析',
+    detail: '两次尝试后展示了解析，后续需要无提示验证。',
+  },
+};
+
+function formatElapsed(elapsed: number): string {
+  const seconds = Math.floor(elapsed / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-export default function SessionComplete({ cardsCompleted, elapsed, beforeSnapshot, onBack }: Props) {
-  const [afterSnapshot, setAfterSnapshot] = useState<AbilitySnapshot | null>(null);
-  const [afterFailed, setAfterFailed] = useState(false);
+function buildNextDecision(evidence: SessionEvidenceItem[]) {
+  const revealed = evidence.filter((item) => item.outcome === 'REVEALED_AFTER_RETRY');
+  const retried = evidence.filter((item) => item.outcome === 'RETRY_CORRECT');
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const snap = await getAbilitySnapshot();
-        if (!cancelled) setAfterSnapshot(snap);
-      } catch {
-        if (!cancelled) setAfterFailed(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
+  if (revealed.length > 0) {
+    const target = revealed[0];
+    return {
+      title: '先做一次无提示验证',
+      reason: `本次有 ${revealed.length} 题在两次尝试后查看了解析；这只说明当下需要再验证，不等于长期薄弱。`,
+      action: `下次优先用同类任务回测${target.dimensions
+        .map((dimension) => DIMENSION_LABELS[dimension])
+        .join('、')}线索。`,
     };
-  }, []);
+  }
 
-  const seconds = Math.floor(elapsed / 1000);
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
+  if (retried.length > 0) {
+    const target = retried[0];
+    return {
+      title: '把“调整后会做”变成独立完成',
+      reason: `本次有 ${retried.length} 题在提示后完成，说明这类线索值得安排一次独立回测。`,
+      action: `下次先给一道不带提示的${target.dimensions
+        .map((dimension) => DIMENSION_LABELS[dimension])
+        .join('、')}任务。`,
+    };
+  }
 
-  // Fallback chain keeps the page renderable: missing post-read → diff vs the
-  // pre-snapshot (all-zero deltas), never a throw.
-  const before = beforeSnapshot ?? blankSnapshot();
-  const after = afterSnapshot ?? before;
-  const suggestion = generateSuggestion(after);
-  const feedback = analyzeResult(before, after, cardsCompleted);
+  return {
+    title: '进入下一组真实语境任务',
+    reason: '本次已完成的题目均为首次作答一致；仍需要换语境验证，不能据此宣称掌握。',
+    action: '下一步选择同一能力维度、不同语境的真题素材继续训练。',
+  };
+}
+
+export default function SessionComplete({ cardsCompleted, elapsed, evidence, onBack }: Props) {
+  const firstTry = evidence.filter((item) => item.outcome === 'FIRST_TRY_CORRECT').length;
+  const retried = evidence.filter((item) => item.outcome === 'RETRY_CORRECT').length;
+  const revealed = evidence.filter((item) => item.outcome === 'REVEALED_AFTER_RETRY').length;
+  const decision = buildNextDecision(evidence);
 
   return (
     <motion.div
@@ -61,78 +83,64 @@ export default function SessionComplete({ cardsCompleted, elapsed, beforeSnapsho
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.5 }}
     >
-      <div className="session-complete__icon">🎉</div>
-      <h2 className="session-complete__title">今日学习完成！</h2>
+      <div className="session-complete__icon">✦</div>
+      <p className="session-complete__eyebrow">SESSION EVIDENCE RECORDED</p>
+      <h2 className="session-complete__title">本次学习已形成可追溯证据</h2>
+      <p className="session-complete__subtitle">
+        这里总结的是本次真实作答行为，不把一次训练写成长期能力结论。
+      </p>
 
       <div className="session-complete__stats">
         <div className="session-complete__stat">
           <span className="session-complete__stat-value">{cardsCompleted}</span>
-          <span className="session-complete__stat-label">卡片完成</span>
+          <span className="session-complete__stat-label">完成卡片</span>
         </div>
         <div className="session-complete__stat">
-          <span className="session-complete__stat-value">
-            {mins}:{String(secs).padStart(2, '0')}
-          </span>
-          <span className="session-complete__stat-label">用时</span>
+          <span className="session-complete__stat-value">{formatElapsed(elapsed)}</span>
+          <span className="session-complete__stat-label">真实用时</span>
+        </div>
+        <div className="session-complete__stat">
+          <span className="session-complete__stat-value">{firstTry}</span>
+          <span className="session-complete__stat-label">首次完成</span>
         </div>
       </div>
 
-      <section className="result__section">
-        <h3 className="result__section-title">能力变化</h3>
-        {afterFailed ? (
-          <p className="result__note">能力已更新，返回首页可查看最新评分。</p>
-        ) : (
-          <ul className="result__deltas">
-            {DIMENSIONS.map((d) => {
-              const b = getAbilityKey(before, d.key);
-              const a = getAbilityKey(after, d.key);
-              const dp = Math.round((a - b) * 100);
-              const deltaText = dp > 0 ? `+${dp}` : dp < 0 ? `${dp}` : '—';
-              const cls = dp > 0 ? 'result__delta--up' : dp < 0 ? 'result__delta--down' : 'result__delta--flat';
-              return (
-                <li key={d.key} className="result__delta">
-                  <span className="result__delta-label">{d.label}</span>
-                  <span className="result__delta-range">
-                    {toPercent(b)} → {toPercent(a)}
-                  </span>
-                  <span className={`result__delta-badge ${cls}`}>{deltaText}</span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+      <section className="result__section result__section--evidence">
+        <div className="result__section-heading">
+          <h3 className="result__section-title">本次行为证据</h3>
+          <span className="result__evidence-count">{evidence.length} 条</span>
+        </div>
+        <div className="result__outcome-summary" aria-label="本次作答结果汇总">
+          <span>首次完成 {firstTry}</span>
+          <span>调整后完成 {retried}</span>
+          <span>查看解析 {revealed}</span>
+        </div>
+        <ul className="result__evidence-list">
+          {evidence.map((item, index) => {
+            const copy = OUTCOME_COPY[item.outcome];
+            const source = item.sourceDetail;
+            return (
+              <li key={item.cardId} className="result__evidence-item">
+                <div className="result__evidence-item-head">
+                  <span className="result__evidence-index">{String(index + 1).padStart(2, '0')}</span>
+                  <strong>{copy.label}</strong>
+                </div>
+                <p>{copy.detail}</p>
+                <p className="result__evidence-meta">
+                  涉及：{item.dimensions.map((dimension) => DIMENSION_LABELS[dimension]).join('、')}
+                  {source ? ` · ${source.examDate} ${source.exam} ${source.paper}` : ''}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
       </section>
 
-      <section className="result__section">
-        <h3 className="result__section-title">AI 小结</h3>
-        <p className="result__suggestion-headline">{suggestion.headline}</p>
-
-        <div className="result__feedback">
-          <span className="result__feedback-label">本次提升</span>
-          <ul className="result__suggestion-items">
-            {feedback.improvements.map((item) => (
-              <li key={item} className="result__suggestion-item">
-                {item}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="result__feedback">
-          <span className="result__feedback-label">当前薄弱</span>
-          <ul className="result__suggestion-items">
-            {feedback.weakPoints.map((item) => (
-              <li key={item} className="result__suggestion-item">
-                {item}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="result__feedback">
-          <span className="result__feedback-label">下一步</span>
-          <p className="result__feedback-action">{feedback.nextAction}</p>
-        </div>
+      <section className="result__section result__section--decision">
+        <span className="result__decision-kicker">NEXT BEST LEARNING ACTION</span>
+        <h3 className="result__section-title">{decision.title}</h3>
+        <p className="result__decision-reason">依据：{decision.reason}</p>
+        <p className="result__decision-action">{decision.action}</p>
       </section>
 
       <motion.button

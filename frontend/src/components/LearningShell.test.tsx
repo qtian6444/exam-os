@@ -125,10 +125,24 @@ describe('LearningShell training loop', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
 
-    await waitFor(() => expect(onComplete).toHaveBeenCalledWith({
+    await waitFor(() => expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({
       cardsCompleted: 2,
       elapsed: expect.any(Number),
-    }));
+      evidence: [
+        expect.objectContaining({
+          cardId: 'choice-1',
+          outcome: 'RETRY_CORRECT',
+          attempts: 2,
+          dimensions: ['sentence', 'reading'],
+        }),
+        expect.objectContaining({
+          cardId: 'choice-2',
+          outcome: 'REVEALED_AFTER_RETRY',
+          attempts: 2,
+          dimensions: ['sentence', 'reading'],
+        }),
+      ],
+    })));
     expect(applyLearningEvidenceMock).toHaveBeenCalledTimes(2);
     expect(applyLearningEvidenceMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
       sessionId: 'session-1',
@@ -142,5 +156,17 @@ describe('LearningShell training loop', () => {
       correct: false,
       userAnswer: { selectedOptionId: 'B' },
     }));
+  });
+
+  it('only dequeues the initial card once when mounted under StrictMode', async () => {
+    const { StrictMode } = await import('react');
+    render(
+      <StrictMode>
+        <LearningShell sessionId="strict-session" onComplete={vi.fn()} />
+      </StrictMode>,
+    );
+
+    expect(await screen.findByText('First sentence')).toBeTruthy();
+    expect(getNextCardMock).toHaveBeenCalledTimes(1);
   });
 });

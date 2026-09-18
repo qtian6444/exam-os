@@ -7,6 +7,7 @@ import {
   getCurrentAccountIdentity,
   loginWithPhonePassword,
 } from './authAccount';
+import { isSupabaseConfigured } from '../../lib/supabase';
 import type {
   AccountCredentials,
   AccountIdentity,
@@ -15,9 +16,12 @@ import type {
   PasswordLoginAttempt,
 } from './accountTypes';
 import './AccountAccess.css';
+import './AccountAccessV2.css';
 
 interface AccountAccessProps {
   children?: ReactNode;
+  /** Guest demo enters the short starting-context interview before six cards. */
+  onGuestExperienceStart?: () => void;
   readIdentity?: () => Promise<AccountIdentity>;
   login?: (credentials: AccountCredentials) => Promise<PasswordLoginAttempt>;
   activateSession?: (
@@ -42,6 +46,7 @@ type AccountPanelMode = Extract<
 
 export default function AccountAccess({
   children,
+  onGuestExperienceStart,
   readIdentity = getCurrentAccountIdentity,
   login = loginWithPhonePassword,
   activateSession = activateAccountSession,
@@ -56,6 +61,16 @@ export default function AccountAccess({
 
   useEffect(() => {
     let cancelled = false;
+
+    // Do not turn a missing *local* .env file into a fake account read failure.
+    // Injected readers (tests or future host integrations) still retain their
+    // explicit behavior; only the real default adapter gets this guest fallback.
+    if (!isSupabaseConfigured && readIdentity === getCurrentAccountIdentity) {
+      setMode('WELCOME');
+      return () => {
+        cancelled = true;
+      };
+    }
 
     readIdentity()
       .then((value) => {
@@ -84,6 +99,7 @@ export default function AccountAccess({
     activeRequestRef.current += 1;
     setHasEnteredGuest(true);
     setMode('GUEST');
+    onGuestExperienceStart?.();
   };
 
   const retryIdentityRead = () => {
@@ -146,22 +162,25 @@ export default function AccountAccess({
     <>
       {hasEnteredGuest && children}
       <main className="account-access__experience">
-        <section
-          className={`account-access__dialog${
-            mode === 'LOGIN' ? ' account-access__dialog--login' : ''
-          }${
-            mode === 'WECHAT' ? ' account-access__dialog--wechat' : ''
-          }`}
-          role="dialog"
-          aria-modal="true"
-          aria-label={
-            mode === 'LOGIN'
-              ? '账号登录'
-              : mode === 'WECHAT'
-                ? '微信人工开通'
-                : '账号欢迎入口'
-          }
-        >
+        <div className="account-access__frame">
+          <section
+            className={`account-access__dialog${
+              mode === 'LOGIN' ? ' account-access__dialog--login' : ''
+            }${
+              mode === 'WECHAT' ? ' account-access__dialog--wechat' : ''
+            }${
+              mode === 'WELCOME' ? ' account-access__dialog--welcome' : ''
+            }`}
+            role="dialog"
+            aria-modal="true"
+            aria-label={
+              mode === 'LOGIN'
+                ? '账号登录'
+                : mode === 'WECHAT'
+                  ? '微信人工开通'
+                  : '账号欢迎入口'
+            }
+          >
           {mode === 'CHECKING' && (
             <div className="account-access__status" role="status">
               <span
@@ -207,7 +226,7 @@ export default function AccountAccess({
                 aria-current={mode === 'WECHAT' ? 'page' : undefined}
               >
                 <span className="account-access__tab-index">02</span>
-                <span className="account-access__tab-title">微信开通</span>
+                <span className="account-access__tab-title">人工开通</span>
                 <span className="account-access__tab-copy">人工开通永久账号</span>
               </button>
               <button
@@ -218,8 +237,8 @@ export default function AccountAccess({
                 aria-current={mode === 'WELCOME' ? 'page' : undefined}
               >
                 <span className="account-access__tab-index">03</span>
-                <span className="account-access__tab-title">先了解</span>
-                <span className="account-access__tab-copy">了解长期学习记忆</span>
+                <span className="account-access__tab-title">游客体验</span>
+                <span className="account-access__tab-copy">先确定起点，再体验 6 题</span>
               </button>
             </nav>
           )}
@@ -227,50 +246,47 @@ export default function AccountAccess({
           {mode === 'WELCOME' && (
             <div className="account-access__welcome">
               <div className="account-access__welcome-copy">
-                <p className="account-access__eyebrow">
-                  Exam OS · Learning OS
-                </p>
-                <h1>让每一次学习，都成为下一次进步的依据</h1>
+                <div className="account-access__brand" aria-label="Exam OS">
+                  <span className="account-access__brand-mark" aria-hidden="true">考</span>
+                  <span>
+                    <strong>Exam OS</strong>
+                    <small>应试英语学习操作系统</small>
+                  </span>
+                </div>
+                <p className="account-access__eyebrow">EXAM ENGLISH · LEARNING PATH</p>
+                <h1>
+                  <span>以真题为舟，</span>
+                  <span>渡向更大的世界。</span>
+                </h1>
                 <p className="account-access__promise">
-                  登录后，AI会持续理解你的英语学习状态。
+                  以理解为桨，从四级、六级到雅思、托福，走清每一段英语应试之路。
                 </p>
-                <p className="account-access__description">
-                  永久账号会持续积累你的学习记录、能力变化、薄弱点、优势项与学习习惯，形成长期学习记忆。
-                </p>
-
-                <ul className="account-access__memory-list">
-                  <li>持续记录英语能力变化</li>
-                  <li>识别薄弱点与优势项</li>
-                  <li>为个性化学习建议积累依据</li>
-                </ul>
               </div>
 
-              <div className="account-access__choices">
+              <section className="account-access__guest-panel" aria-labelledby="guest-experience-title">
+                <div className="account-access__guest-heading">
+                  <div>
+                    <p className="account-access__guest-kicker">游客体验</p>
+                    <h2 id="guest-experience-title">无需注册，先确定学习起点</h2>
+                  </div>
+                  <span className="account-access__guest-count">6</span>
+                </div>
+                <div className="account-access__guest-lesson">
+                  <span>当前开放</span>
+                  <strong>真题阅读与句法</strong>
+                  <p>先回答几个问题，再进入 6 道真实语境任务</p>
+                </div>
                 <button
                   type="button"
                   className="account-access__primary"
-                  onClick={() => showAccountPanel('LOGIN')}
-                >
-                  登录永久账号
-                </button>
-                <button
-                  type="button"
-                  className="account-access__secondary"
-                  onClick={() => showAccountPanel('WECHAT')}
-                >
-                  还没有账号？微信人工开通
-                </button>
-                <button
-                  type="button"
-                  className="account-access__guest-action"
                   onClick={enterGuestExperience}
                 >
-                  游客体验
+                  开始体验 <span aria-hidden="true">→</span>
                 </button>
                 <p className="account-access__guest-note">
-                  游客可以体验完整学习流程，但学习数据仅作临时体验，不保证长期保存。
+                  起点回答与游客进度仅保存在本机；真实能力线索来自作答过程。
                 </p>
-              </div>
+              </section>
             </div>
           )}
 
@@ -287,7 +303,27 @@ export default function AccountAccess({
               onGuestTry={enterGuestExperience}
             />
           )}
-        </section>
+          </section>
+
+          <aside className="account-access__visual" aria-hidden="true">
+            <div className="account-access__visual-rail account-access__visual-rail--top">TURN → ANSWER</div>
+            <div className="account-access__visual-kicker">EXAM OS · ENGLISH ASCENSION</div>
+            <div className="account-access__visual-orbit">
+              <div className="account-access__visual-orbit-ring" />
+              <div className="account-access__visual-orbit-ring account-access__visual-orbit-ring--inner" />
+              <div className="account-access__visual-mark">
+                <span>修</span>
+                <small>PASSPORT</small>
+              </div>
+            </div>
+            <div className="account-access__visual-rule" />
+            <div className="account-access__visual-copy">
+              <h2>转折一响 · 真答案登场</h2>
+              <p>旧信息退位 · 新答案登基</p>
+            </div>
+            <div className="account-access__visual-rail account-access__visual-rail--side">READ · UNDERSTAND · RETRIEVE</div>
+          </aside>
+        </div>
       </main>
     </>
   );

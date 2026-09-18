@@ -14,6 +14,7 @@ npm-debug.log*
 *.jpg
 *.jpeg
 *.png
+!frontend/src/assets/exam-os-ink-hero-v1.png
 *.gif
 !frontend/public/*.jpg
 !frontend/public/*.png

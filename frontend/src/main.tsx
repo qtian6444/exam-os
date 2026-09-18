@@ -2,7 +2,11 @@ import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
-import { ensureAnonymousSession, resetAnonymousSessionInit } from './lib/supabase'
+import {
+  ensureAnonymousSession,
+  isSupabaseConfigured,
+  resetAnonymousSessionInit,
+} from './lib/supabase'
 
 const AUTH_TIMEOUT_MS = 12_000
 
@@ -13,6 +17,14 @@ function Bootstrap() {
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
+    // Local demo mode is explicitly guest-only. It exists so an unconfigured
+    // checkout can be reviewed/recorded without white-screening; permanent
+    // accounts and cloud persistence still require real Supabase variables.
+    if (!isSupabaseConfigured) {
+      setStatus('ready')
+      return
+    }
+
     let cancelled = false
     let timedOut = false
 

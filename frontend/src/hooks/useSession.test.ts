@@ -11,6 +11,7 @@ vi.mock('../lib/db', () => ({
 
 vi.mock('../lib/supabase', () => ({
   getAuthUserId: vi.fn(),
+  isSupabaseConfigured: true,
 }));
 
 vi.mock('../lib/ability', () => ({
@@ -182,6 +183,7 @@ describe('useSession — completeOnboarding', () => {
     // Full context is stored (uid-scoped) and the done marker follows it.
     expect(JSON.parse(sessionStorage.getItem(CONTEXT_KEY) ?? 'null')).toEqual(CONTEXT);
     expect(sessionStorage.getItem(DONE_KEY)).toBe('1');
+    expect(result.current.profileContext).toEqual(CONTEXT);
 
     // The existing CET-4 training entry is untouched: the mock queue is reset.
     expect(resetQueue).toHaveBeenCalled();
@@ -202,5 +204,23 @@ describe('useSession — completeOnboarding', () => {
     expect(sessionStorage.getItem(CONTEXT_KEY)).toBeNull();
     expect(sessionStorage.getItem(DONE_KEY)).toBeNull();
     expect(result.current.stage).toBe('onboarding');
+  });
+});
+
+describe('useSession — public guest experience', () => {
+  it('starts guest onboarding before the six-card demo without treating self-report as ability', async () => {
+    const { result } = renderHook(() => useSession());
+    await waitFor(() => expect(result.current.stage).toBe('onboarding'));
+
+    act(() => {
+      result.current.startGuestExperience();
+    });
+
+    expect(result.current.stage).toBe('onboarding');
+    expect(persist).not.toHaveBeenCalled();
+    expect(ensure).not.toHaveBeenCalled();
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(blank).toHaveBeenCalled();
+    expect(resetQueue).toHaveBeenCalled();
   });
 });

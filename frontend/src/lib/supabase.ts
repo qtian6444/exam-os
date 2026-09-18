@@ -1,10 +1,34 @@
 import { createClient } from '@supabase/supabase-js';
 import { createAuthInitializer } from './authInit';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const configuredUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
+const configuredAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+/**
+ * A checkout without `.env.local` must still be able to render the guest demo.
+ * This flag is deliberately exported instead of inferring configuration from a
+ * failed request: a network failure in a configured production project must
+ * remain an error, never silently become an offline demo.
+ */
+export const isSupabaseConfigured = Boolean(configuredUrl && configuredAnonKey);
+
+/**
+ * `createClient` is module-scoped, so it needs syntactically valid values even
+ * for an unconfigured local checkout. The `.invalid` TLD cannot resolve; no
+ * account or cloud write is attempted while `isSupabaseConfigured` is false.
+ */
+export const supabaseRuntimeConfig = {
+  url: isSupabaseConfigured
+    ? configuredUrl!
+    : 'https://exam-os-local-demo.invalid',
+  anonKey: isSupabaseConfigured
+    ? configuredAnonKey!
+    : 'exam-os-local-demo-not-a-secret',
+} as const;
+
+export const LOCAL_DEMO_USER_ID = 'local-demo-guest';
+
+export const supabase = createClient(supabaseRuntimeConfig.url, supabaseRuntimeConfig.anonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
@@ -62,6 +86,7 @@ const initializer = createAuthInitializer({
  * error/retry state, never silently fall back to unauthenticated writes.
  */
 export function ensureAnonymousSession(): Promise<string> {
+  if (!isSupabaseConfigured) return Promise.resolve(LOCAL_DEMO_USER_ID);
   return initializer.ensure();
 }
 
@@ -70,6 +95,7 @@ export function ensureAnonymousSession(): Promise<string> {
  * generation. Safe to call when nothing is in flight (no-op).
  */
 export function resetAnonymousSessionInit(): void {
+  if (!isSupabaseConfigured) return;
   initializer.reset();
 }
 
@@ -78,6 +104,7 @@ export function resetAnonymousSessionInit(): void {
  * Call only after ensureAnonymousSession() has succeeded.
  */
 export async function getAuthUserId(): Promise<string> {
+  if (!isSupabaseConfigured) return LOCAL_DEMO_USER_ID;
   const { data } = await supabase.auth.getSession();
   const uid = data.session?.user?.id;
   if (!uid) {
@@ -92,6 +119,9 @@ export async function getAuthUserId(): Promise<string> {
  * Call only after ensureAnonymousSession() has succeeded.
  */
 export async function getAccessToken(): Promise<string> {
+  if (!isSupabaseConfigured) {
+    throw new Error('Supabase is not configured for this local demo');
+  }
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) {

@@ -6,21 +6,23 @@ import SessionComplete from './components/SessionComplete';
 import AccountAccess from './features/account/AccountAccess';
 import OnboardingFlow from './components/onboarding/OnboardingFlow';
 import { useSession } from './hooks/useSession';
+import type { SessionStats } from './types';
 
 export default function App() {
   const {
     stage,
     session,
-    beforeSnapshot,
+    profileContext,
     lastStats,
     startLearning,
+    startGuestExperience,
     completeOnboarding,
     completeSession,
     backToDashboard,
   } = useSession();
 
   const handleLearningComplete = useCallback(
-    (stats: { cardsCompleted: number; elapsed: number }) => {
+    (stats: SessionStats) => {
       completeSession(stats);
     },
     [completeSession],
@@ -28,7 +30,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <AccountAccess>
+      <AccountAccess onGuestExperienceStart={startGuestExperience}>
         <AnimatePresence mode="wait">
           {stage === 'onboarding' && (
             <OnboardingFlow
@@ -38,7 +40,11 @@ export default function App() {
           )}
 
           {stage === 'dashboard' && (
-            <Dashboard key="dashboard" onStart={startLearning} />
+            <Dashboard
+              key="dashboard"
+              onStart={startLearning}
+              profileContext={profileContext}
+            />
           )}
 
           {stage === 'learning' && (
@@ -54,7 +60,7 @@ export default function App() {
               key="result"
               cardsCompleted={lastStats?.cardsCompleted ?? 0}
               elapsed={lastStats?.elapsed ?? 0}
-              beforeSnapshot={beforeSnapshot}
+              evidence={lastStats?.evidence ?? []}
               onBack={backToDashboard}
             />
           )}

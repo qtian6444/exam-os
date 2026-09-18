@@ -8,6 +8,8 @@ vi.mock('@supabase/supabase-js', () => ({
 }));
 vi.mock('../../lib/supabase', () => ({
   supabase: { auth: {} },
+  isSupabaseConfigured: true,
+  supabaseRuntimeConfig: { url: 'https://example.test', anonKey: 'test-key' },
 }));
 
 import {

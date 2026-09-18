@@ -1,4 +1,4 @@
-import { supabase, getAuthUserId } from './supabase';
+import { supabase, getAuthUserId, isSupabaseConfigured } from './supabase';
 import type { ExamType, ExamBatch, DailyTime } from '../types';
 import {
   type AbilitySnapshot,
@@ -179,6 +179,9 @@ export function resolveAbilitySnapshot(
 }
 
 export async function getAbilitySnapshot(): Promise<AbilitySnapshot> {
+  // No cloud profile is implied in the explicit local-guest demo mode. A blank
+  // snapshot means "not yet observed", not an ability score of zero.
+  if (!isSupabaseConfigured) return blankSnapshot();
   const userId = await getAuthUserId();
   const { data, error } = await supabase
     .from('user_profile')
@@ -230,6 +233,13 @@ export async function applyLearningEvidence(params: {
   correct: boolean | null;
   userAnswer?: unknown;
 }): Promise<boolean> {
+  // Local demo evidence is kept only in this browser session. It never calls
+  // the authoritative RPC, never updates ability/mastery, and is visibly
+  // described as local guest progress in the entry UI.
+  if (!isSupabaseConfigured) {
+    return persistLocalGuestEvidence(params);
+  }
+
   // Stable operation id so a retry of the same (session, card) hits the same
   // learning_record PK and the RPC returns idempotent success instead of a
   // duplicate. The RPC derives the owner from auth.uid() — there is no user_id
@@ -280,6 +290,41 @@ export async function applyLearningEvidence(params: {
     return false;
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+const LOCAL_GUEST_EVIDENCE_KEY = 'exam_os.local_guest_evidence.v1';
+
+function persistLocalGuestEvidence(params: {
+  sessionId: string;
+  cardId: string;
+  cardType: 'choice' | 'reading_breakdown' | 'reorder';
+  correct: boolean | null;
+  userAnswer?: unknown;
+}): boolean {
+  try {
+    const raw = sessionStorage.getItem(LOCAL_GUEST_EVIDENCE_KEY);
+    const existing = raw ? JSON.parse(raw) : [];
+    const records = Array.isArray(existing) ? existing : [];
+    const key = `${params.sessionId}::${params.cardId}`;
+    const next = records.some((record: { key?: unknown }) => record.key === key)
+      ? records
+      : [
+          ...records,
+          {
+            key,
+            cardId: params.cardId,
+            cardType: params.cardType,
+            correct: params.correct,
+            savedAt: new Date().toISOString(),
+          },
+        ];
+    sessionStorage.setItem(LOCAL_GUEST_EVIDENCE_KEY, JSON.stringify(next));
+    return true;
+  } catch {
+    // Browsers can deny sessionStorage; progression remains possible in a
+    // non-persistent demo, but this never masquerades as an RPC-backed write.
+    return true;
   }
 }
 

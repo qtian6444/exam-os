@@ -3,6 +3,7 @@ import {
   type ChoiceCardData,
   type ReorderCardData,
   type LearningCard,
+  type ContentSourceDetail,
 } from '../types';
 import { breakdownSentences } from './content-library';
 
@@ -21,6 +22,18 @@ import { breakdownSentences } from './content-library';
 // 用户先做一个主动动作（选词 / 排序 / 阅读定位 / 中英对应 / 语境辨义）。
 
 let cardIndex = 0;
+
+function sourceTrace(paper: string, location: string): ContentSourceDetail {
+  return {
+    exam: 'CET-4',
+    examDate: '2026 年 6 月',
+    paper,
+    location,
+    material: '项目方提供的《2026年6月英语四级真题和答案（3套全）》',
+    status: 'PROJECT_MATERIAL_VERIFIED',
+    disclosure: '已与项目方提供的真题解析资料核对；不表示教育部官方难度校准。',
+  };
+}
 
 function buildCardQueue(): LearningCard[] {
   const cards: LearningCard[] = [];
@@ -45,6 +58,7 @@ function buildCardQueue(): LearningCard[] {
     correctOptionId: 'A',
     presentationVariant: 'cloze',
     source: 'CET_REAL',
+    sourceDetail: sourceTrace('第二套', '阅读 Section C · Passage 2 开头'),
     teaching: {
       meaning: '音乐是一种通用的语言。',
       collocation: 'universal language（通用语言）；universal value（普世价值）',
@@ -66,6 +80,7 @@ function buildCardQueue(): LearningCard[] {
     ],
     correctOrder: ['a', 'b', 'c'],
     source: 'CET_REAL',
+    sourceDetail: sourceTrace('第三套', '阅读 Section C · Passage 1 开头'),
     teaching: {
       meaning: '厌恶是一种普遍的人类情感。',
       collocation: 'a universal human emotion（普遍的人类情感）；feel disgust（感到厌恶）',
@@ -93,6 +108,7 @@ function buildCardQueue(): LearningCard[] {
     correctOptionId: 'A',
     presentationVariant: 'reading',
     source: 'CET_REAL',
+    sourceDetail: sourceTrace('第一套', '阅读 Section C · Passage 1 · 第 46 题'),
     teaching: {
       meaning: '有机食品值得更高的价格吗？这是杂货店里经典的取舍难题。',
       collocation: 'worth the higher price（物有所值）；a classic dilemma（经典两难）',
@@ -115,6 +131,7 @@ function buildCardQueue(): LearningCard[] {
     ],
     correctOrder: ['a', 'b', 'c', 'd'],
     source: 'CET_REAL',
+    sourceDetail: sourceTrace('第二套', '阅读 Section B · 第 36 题定位句'),
     teaching: {
       meaning: '痴呆症通常会随着时间推移而加重。',
       collocation: 'get worse over time（随时间恶化）；typically（通常、一般）',
@@ -142,6 +159,7 @@ function buildCardQueue(): LearningCard[] {
     correctOptionId: 'A',
     presentationVariant: 'translation',
     source: 'CET_REAL',
+    sourceDetail: sourceTrace('第一套', 'Part IV 翻译 · 餐桌礼仪'),
     teaching: {
       meaning: '餐桌礼仪是中华传统文化的重要组成部分。',
       collocation: 'dining etiquette（餐桌礼仪）；an integral part of（……的重要组成部分）',
@@ -167,6 +185,7 @@ function buildCardQueue(): LearningCard[] {
     correctOptionId: 'A',
     presentationVariant: 'standard',
     source: 'CET_REAL',
+    sourceDetail: sourceTrace('第三套', '阅读 Section B · 第 36 题定位句'),
     teaching: {
       meaning: '关于薪酬的问题也最好避免（提及）。',
       collocation: 'regarding pay（关于薪酬）；regarding + 名词（关于……）',

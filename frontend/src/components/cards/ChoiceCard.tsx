@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { ChoiceCardData, ChoiceOption } from '../../types';
 import type { RuleFeedback } from '../../lib/feedback';
+import SourceTrace from '../SourceTrace';
 
 const VARIANT_LABEL: Record<string, string> = {
   cloze: '选词填空',
@@ -51,6 +52,8 @@ export default function ChoiceCard({ data, onChoice, locked = false, feedback = 
       {variantLabel && (
         <span className="choice-card__variant">{variantLabel}</span>
       )}
+
+      <SourceTrace detail={data.sourceDetail} />
 
       {data.sentence && (
         <p className={`choice-card__sentence choice-card__sentence--${variant}`}>
