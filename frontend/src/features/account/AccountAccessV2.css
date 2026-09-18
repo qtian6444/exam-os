@@ -314,3 +314,260 @@
   .account-access__visual-mark span { font-size: 105px; }
   .account-access__visual-copy h2 { font-size: 27px; }
 }
+
+/* ── Ink gateway correction: keep the page composition fixed ──
+   The watercolor scene is the product surface. Account modes only replace
+   the content rail below the shared introduction and tabs; they must never
+   move the scene or reflow the title into a different layout. */
+.account-access__experience {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 100 !important;
+  display: block !important;
+  min-height: 100dvh !important;
+  padding: clamp(28px, 5vw, 74px) clamp(18px, 6vw, 92px) 48px !important;
+  overflow-y: auto !important;
+  color: var(--ink) !important;
+  background:
+    linear-gradient(90deg, rgba(249,251,252,.94) 0%, rgba(249,251,252,.78) 41%, rgba(247,250,252,.2) 78%),
+    url('../../assets/exam-os-ink-hero-v1.png') center / cover no-repeat !important;
+}
+
+.account-access__frame {
+  display: block !important;
+  width: min(100%, 1180px) !important;
+  height: auto !important;
+  max-height: none !important;
+  min-height: 0 !important;
+  margin: 0 auto !important;
+}
+
+.account-access__experience .account-access__dialog,
+.account-access__experience .account-access__dialog--login,
+.account-access__experience .account-access__dialog--wechat,
+.account-access__experience .account-access__dialog--welcome {
+  position: relative !important;
+  display: block !important;
+  width: min(100%, 920px) !important;
+  max-width: 920px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  color: var(--ink) !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  scrollbar-width: auto !important;
+}
+
+.account-access__experience .account-access__dialog--login {
+  max-width: 760px !important;
+}
+
+.account-access__experience .account-access__dialog--wechat {
+  max-width: 920px !important;
+}
+
+.account-access__visual { display: none !important; }
+
+.account-access__gateway-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(100%, 780px);
+  margin: 0 0 28px;
+}
+
+.account-access__gateway-intro .account-access__brand {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+  color: var(--ink);
+}
+
+.account-access__gateway-intro .account-access__brand-mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  color: #fff9f1;
+  font: 23px/1 var(--font-display);
+  background: var(--cinnabar);
+  border: 2px solid #a52527;
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 2px rgba(255,243,220,.48);
+}
+
+.account-access__gateway-intro .account-access__brand strong {
+  display: block;
+  color: var(--ink);
+  font: 600 27px/1 var(--font-display);
+  letter-spacing: .025em;
+}
+
+.account-access__gateway-intro .account-access__brand small {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink-muted);
+  font: 500 11px/1.3 var(--font-ui);
+  letter-spacing: .12em;
+}
+
+.account-access__gateway-intro .account-access__eyebrow {
+  margin: 8px 0 0;
+  color: var(--cinnabar);
+  font: 800 11px/1.3 var(--font-ui);
+  letter-spacing: .12em;
+}
+
+.account-access__gateway-intro h1 {
+  display: flex;
+  flex-direction: column;
+  max-width: 780px;
+  margin: 0;
+  color: var(--ink);
+  font: 600 clamp(42px, 5.2vw, 68px)/1.1 var(--font-display);
+  letter-spacing: -.045em;
+}
+
+.account-access__gateway-intro .account-access__promise {
+  max-width: 650px;
+  margin: 0;
+  color: var(--ink-muted);
+  font: 500 clamp(15px, 1.5vw, 18px)/1.72 var(--font-ui);
+}
+
+.account-access__tabs,
+.account-access__dialog--login .account-access__tabs,
+.account-access__dialog--welcome .account-access__tabs {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  width: min(100%, 820px) !important;
+  margin: 0 0 26px !important;
+  overflow: hidden !important;
+  background: rgba(255,255,255,.78) !important;
+  border: 1px solid rgba(31,40,48,.13) !important;
+  border-radius: 18px !important;
+  box-shadow: 0 16px 42px rgba(36,52,64,.1) !important;
+}
+
+.account-access__tabs button {
+  min-height: 82px !important;
+  padding: 16px 18px !important;
+  color: var(--ink-muted) !important;
+  background: transparent !important;
+  border-right: 1px solid rgba(31,40,48,.1) !important;
+  transition: color 180ms ease, background 180ms ease !important;
+}
+
+.account-access__tabs button:hover,
+.account-access__tabs button.is-active {
+  color: var(--ink) !important;
+  background: rgba(255,255,255,.64) !important;
+}
+
+.account-access__tabs button.is-active {
+  box-shadow: inset 0 -3px 0 var(--cinnabar) !important;
+}
+
+.account-access__tabs button.is-active::after { display: none !important; }
+
+.account-access__tab-index { color: var(--cinnabar) !important; }
+.account-access__tab-copy { color: var(--ink-muted) !important; }
+
+.account-access__guest-panel {
+  width: min(100%, 820px);
+  gap: 16px;
+  padding: 22px 24px 18px;
+  background: rgba(255,255,255,.86) !important;
+  border: 1px solid rgba(31,40,48,.12) !important;
+  border-radius: 18px !important;
+  box-shadow: 0 18px 42px rgba(36,52,64,.1) !important;
+}
+
+.account-access__guest-panel .account-access__guest-kicker,
+.account-access__guest-panel .account-access__guest-heading h2,
+.account-access__guest-panel .account-access__guest-count,
+.account-access__guest-panel .account-access__guest-lesson strong,
+.account-access__guest-panel .account-access__guest-note {
+  color: var(--ink) !important;
+}
+
+.account-access__guest-panel .account-access__guest-kicker,
+.account-access__guest-panel .account-access__guest-lesson > span {
+  color: var(--cinnabar) !important;
+}
+
+.account-access__guest-panel .account-access__guest-lesson {
+  background: rgba(252,252,250,.72) !important;
+  border-color: rgba(31,40,48,.13) !important;
+}
+
+.account-access__guest-panel .account-access__guest-lesson p,
+.account-access__guest-panel .account-access__guest-note {
+  color: var(--ink-muted) !important;
+}
+
+.account-access__guest-panel .account-access__primary {
+  color: #fffaf2 !important;
+  background: var(--cinnabar) !important;
+  border-color: var(--cinnabar-deep) !important;
+  box-shadow: 0 10px 18px rgba(157,40,39,.16) !important;
+}
+
+.account-access__guest-panel .account-access__primary:hover {
+  color: #fffaf2 !important;
+  background: var(--cinnabar-deep) !important;
+}
+
+.account-access__dialog .account-login {
+  max-width: 520px;
+  margin: 0;
+  padding: 14px 0 26px;
+}
+
+.account-access__dialog .account-login__header { text-align: left; }
+.account-access__dialog .account-login__title,
+.account-access__dialog .account-wechat h1 { color: var(--ink) !important; font-family: var(--font-display) !important; }
+.account-access__dialog .account-login__subtitle,
+.account-access__dialog .account-login__label,
+.account-access__dialog .account-wechat__intro,
+.account-access__dialog .account-wechat__steps p,
+.account-access__dialog .account-wechat__qr-card p { color: var(--ink-muted) !important; }
+.account-access__dialog .account-login__input { color: var(--ink) !important; background: rgba(255,255,255,.78) !important; border-color: rgba(31,40,48,.16) !important; }
+.account-access__dialog .account-login__input::placeholder { color: #9aa2a8 !important; }
+.account-access__dialog .account-login__submit { background: var(--cinnabar) !important; }
+.account-access__dialog .account-login__submit:hover { background: var(--cinnabar-deep) !important; }
+.account-access__dialog .account-login__guest,
+.account-access__dialog .account-login__toggle,
+.account-access__dialog .account-wechat__actions button { color: var(--ink-muted) !important; border-color: rgba(31,40,48,.16) !important; }
+.account-access__dialog .account-wechat__qr-card { background: rgba(255,255,255,.72) !important; border-color: rgba(31,40,48,.12) !important; }
+.account-access__dialog .account-wechat__steps strong,
+.account-access__dialog .account-wechat__qr-card > strong { color: var(--ink) !important; }
+.account-access__dialog .account-wechat__steps li > span { color: var(--cinnabar) !important; border-color: var(--cinnabar) !important; }
+
+.account-access__dialog .account-wechat {
+  width: min(100%, 900px);
+  padding: 14px 0 26px;
+}
+
+@media (max-width: 760px) {
+  .account-access__experience {
+    padding: 24px 16px 34px !important;
+    background-position: 63% center !important;
+  }
+
+  .account-access__gateway-intro h1 { font-size: clamp(38px, 11vw, 54px); }
+  .account-access__gateway-intro .account-access__promise { font-size: 15px; }
+  .account-access__tabs { width: 100% !important; }
+  .account-access__tabs button { min-height: 66px !important; padding: 13px 7px !important; text-align: center; }
+  .account-access__tab-index,
+  .account-access__tab-copy { display: none !important; }
+  .account-access__tab-title { align-self: center; font-size: 13px; }
+  .account-access__guest-panel { width: 100%; padding: 20px 16px 16px; }
+  .account-access__dialog .account-login { max-width: none; }
+  .account-access__dialog .account-wechat { width: 100%; }
+}
