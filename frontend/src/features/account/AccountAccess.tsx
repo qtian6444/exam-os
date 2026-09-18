@@ -17,7 +17,6 @@ import type {
 } from './accountTypes';
 import './AccountAccess.css';
 import './AccountAccessV2.css';
-
 interface AccountAccessProps {
   children?: ReactNode;
   /** Guest demo enters the short starting-context interview before six cards. */
@@ -29,7 +28,6 @@ interface AccountAccessProps {
   ) => Promise<LoginResult>;
   reloadPage?: () => void;
 }
-
 type AccountAccessMode =
   | 'CHECKING'
   | 'ERROR'
@@ -38,12 +36,10 @@ type AccountAccessMode =
   | 'WECHAT'
   | 'GUEST'
   | 'PERMANENT';
-
 type AccountPanelMode = Extract<
   AccountAccessMode,
   'WELCOME' | 'LOGIN' | 'WECHAT'
 >;
-
 export default function AccountAccess({
   children,
   onGuestExperienceStart,
@@ -58,10 +54,8 @@ export default function AccountAccess({
   const [isLoginPending, setIsLoginPending] = useState(false);
   const activeRequestRef = useRef(0);
   const committingRequestRef = useRef<number | null>(null);
-
   useEffect(() => {
     let cancelled = false;
-
     // Do not turn a missing *local* .env file into a fake account read failure.
     // Injected readers (tests or future host integrations) still retain their
     // explicit behavior; only the real default adapter gets this guest fallback.
@@ -71,7 +65,6 @@ export default function AccountAccess({
         cancelled = true;
       };
     }
-
     readIdentity()
       .then((value) => {
         if (!cancelled) {
@@ -81,19 +74,16 @@ export default function AccountAccess({
       .catch(() => {
         if (!cancelled) setMode('ERROR');
       });
-
     return () => {
       cancelled = true;
     };
   }, [identityAttempt, readIdentity]);
-
   useEffect(
     () => () => {
       activeRequestRef.current += 1;
     },
     [],
   );
-
   const enterGuestExperience = () => {
     if (committingRequestRef.current !== null) return;
     activeRequestRef.current += 1;
@@ -101,19 +91,16 @@ export default function AccountAccess({
     setMode('GUEST');
     onGuestExperienceStart?.();
   };
-
   const retryIdentityRead = () => {
     activeRequestRef.current += 1;
     setMode('CHECKING');
     setIdentityAttempt((attempt) => attempt + 1);
   };
-
   const showAccountPanel = (nextMode: AccountPanelMode) => {
     if (isLoginPending || committingRequestRef.current !== null) return;
     activeRequestRef.current += 1;
     setMode(nextMode);
   };
-
   const handleLogin = async (
     credentials: AccountCredentials,
   ): Promise<LoginResult> => {
@@ -123,7 +110,6 @@ export default function AccountAccess({
       const attempt = await login(credentials);
       if (requestToken !== activeRequestRef.current) return 'UNKNOWN_ERROR';
       if (attempt.result !== 'SUCCESS') return attempt.result;
-
       committingRequestRef.current = requestToken;
       const result = await activateSession(attempt.session);
       if (requestToken !== activeRequestRef.current) return 'UNKNOWN_ERROR';
@@ -140,9 +126,7 @@ export default function AccountAccess({
       }
     }
   };
-
   if (mode === 'PERMANENT') return <>{children}</>;
-
   if (mode === 'GUEST') {
     return (
       <>
@@ -157,7 +141,6 @@ export default function AccountAccess({
       </>
     );
   }
-
   return (
     <>
       {hasEnteredGuest && children}
@@ -190,7 +173,6 @@ export default function AccountAccess({
               <p>正在确认学习身份…</p>
             </div>
           )}
-
           {mode === 'ERROR' && (
             <div className="account-access__status">
               <h1>暂时无法读取账号状态</h1>
@@ -204,7 +186,25 @@ export default function AccountAccess({
               </button>
             </div>
           )}
-
+          {(mode === 'WELCOME' || mode === 'LOGIN' || mode === 'WECHAT') && (
+            <div className="account-access__gateway-intro">
+              <div className="account-access__brand" aria-label="Exam OS">
+                <span className="account-access__brand-mark" aria-hidden="true">考</span>
+                <span>
+                  <strong>Exam OS</strong>
+                  <small>应试英语学习操作系统</small>
+                </span>
+              </div>
+              <p className="account-access__eyebrow">EXAM ENGLISH · LEARNING PATH</p>
+              <h1>
+                <span>以真题为舟，</span>
+                <span>渡向更大的世界。</span>
+              </h1>
+              <p className="account-access__promise">
+                以理解为桨，从四级、六级到雅思、托福，走清每一段英语应试之路。
+              </p>
+            </div>
+          )}
           {(mode === 'WELCOME' || mode === 'LOGIN' || mode === 'WECHAT') && (
             <nav className="account-access__tabs" aria-label="账号入口选择">
               <button
@@ -242,28 +242,8 @@ export default function AccountAccess({
               </button>
             </nav>
           )}
-
           {mode === 'WELCOME' && (
-            <div className="account-access__welcome">
-              <div className="account-access__welcome-copy">
-                <div className="account-access__brand" aria-label="Exam OS">
-                  <span className="account-access__brand-mark" aria-hidden="true">考</span>
-                  <span>
-                    <strong>Exam OS</strong>
-                    <small>应试英语学习操作系统</small>
-                  </span>
-                </div>
-                <p className="account-access__eyebrow">EXAM ENGLISH · LEARNING PATH</p>
-                <h1>
-                  <span>以真题为舟，</span>
-                  <span>渡向更大的世界。</span>
-                </h1>
-                <p className="account-access__promise">
-                  以理解为桨，从四级、六级到雅思、托福，走清每一段英语应试之路。
-                </p>
-              </div>
-
-              <section className="account-access__guest-panel" aria-labelledby="guest-experience-title">
+            <section className="account-access__guest-panel" aria-labelledby="guest-experience-title">
                 <div className="account-access__guest-heading">
                   <div>
                     <p className="account-access__guest-kicker">游客体验</p>
@@ -286,17 +266,14 @@ export default function AccountAccess({
                 <p className="account-access__guest-note">
                   起点回答与游客进度仅保存在本机；真实能力线索来自作答过程。
                 </p>
-              </section>
-            </div>
+            </section>
           )}
-
           {mode === 'LOGIN' && (
             <AccountLoginView
               onLogin={handleLogin}
               onGuestTry={enterGuestExperience}
             />
           )}
-
           {mode === 'WECHAT' && (
             <AccountWechatView
               onLogin={() => showAccountPanel('LOGIN')}
@@ -304,25 +281,6 @@ export default function AccountAccess({
             />
           )}
           </section>
-
-          <aside className="account-access__visual" aria-hidden="true">
-            <div className="account-access__visual-rail account-access__visual-rail--top">TURN → ANSWER</div>
-            <div className="account-access__visual-kicker">EXAM OS · ENGLISH ASCENSION</div>
-            <div className="account-access__visual-orbit">
-              <div className="account-access__visual-orbit-ring" />
-              <div className="account-access__visual-orbit-ring account-access__visual-orbit-ring--inner" />
-              <div className="account-access__visual-mark">
-                <span>修</span>
-                <small>PASSPORT</small>
-              </div>
-            </div>
-            <div className="account-access__visual-rule" />
-            <div className="account-access__visual-copy">
-              <h2>转折一响 · 真答案登场</h2>
-              <p>旧信息退位 · 新答案登基</p>
-            </div>
-            <div className="account-access__visual-rail account-access__visual-rail--side">READ · UNDERSTAND · RETRIEVE</div>
-          </aside>
         </div>
       </main>
     </>
